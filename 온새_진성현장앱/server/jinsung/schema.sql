@@ -207,7 +207,9 @@ CREATE TABLE IF NOT EXISTS report_log (
     sent_to     TEXT,
     sent_at     TEXT,
     result      TEXT,
-    created_at  TEXT NOT NULL
+    version     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS ix_log_date ON work_log(work_date);

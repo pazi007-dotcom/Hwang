@@ -30,6 +30,8 @@ DEFAULTS = {
     "stake_spacing": "1.2", "brace_spacing": "1.8", "strut_spacing": "1.2", "strut_rows": 2,
     # 줄눈
     "waterstop_w": "0.2", "sealant_top": True,
+    # 공종을 기초/벽체로 나눠 관리할 때: "all" | "base"(①기초+철근) | "wall"(②벽체·헌치)
+    "part": "all",
 }
 
 
@@ -206,9 +208,17 @@ def calc(p: dict) -> dict:
     add("줄눈", "조인트휠러", sec * n_joint, "㎡", f"{sec}㎡ × {n_joint}개소", use="소모")
     add("줄눈", "실런트", seal * n_joint, "m", f"{seal:.3f}m × {n_joint}개소", use="소모")
 
-    per_m = {(q["concrete"]): s["body"], "D16": (u_ton + h_ton) / L, "D13": d_ton / L}
-    if s["lean"] > 0:
-        per_m[q["lean_concrete"]] = s["lean"]
+    part = q["part"]
+    per_m = {}
+    if part in ("all", "base"):            # 철근은 ①기초 단계에 전부 조립한다
+        per_m = {q["concrete"]: s["base"], "D16": (u_ton + h_ton) / L, "D13": d_ton / L}
+        if s["lean"] > 0:
+            per_m[q["lean_concrete"]] = s["lean"]
+    if part in ("all", "wall"):
+        per_m[q["concrete"]] = per_m.get(q["concrete"], D(0)) + s["wall"] + s["haunch"]
+    if part != "all":
+        keep = ("①", "버림") if part == "base" else ("②",)
+        items = [i for i in items if i["stage"] in keep]
     return {"items": items, "checks": checks, "section": s, "blocks": blk, "joints": n_joint,
             "per_m": per_m, "form_area": form_area, "ubar_count": n_u, "dist_length": d_len,
             "ties": ties, "pins": (pin1, pin2)}
