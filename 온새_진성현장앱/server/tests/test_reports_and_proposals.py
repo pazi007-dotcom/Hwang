@@ -116,12 +116,22 @@ def test_failed_mail_stays_in_outbox_and_retries(world, tmp_path):
 
 # ---------- 제안 4·7·8 + 배정 자재 ----------
 def test_allocation_alerts_for_execution_section(world):
-    """실행 단면(버림 삭제·기초 250): 25-21-08은 배정 180㎥보다 13㎥ 부족, 25-18-08은 전량 미사용."""
+    """실행 단면(버림 삭제·기초 250): 버림 배정 41㎥를 기초 25-21-08로 치환해 쓰면 합계로는 남는다."""
     a = {x["item"]: x for x in alerts.allocation_alerts(world["s"], world["site"])}
-    assert a["레미콘 25-21-08"]["level"] == "빨강"
+    pooled = a["레미콘 25-18-08·25-21-08"]
+    assert pooled["level"] == "초록" and pooled["alloc_qty"] == 221
+    assert pooled["balance"] == D("221") - D("193.125")                  # 여유 27.9㎥ (참고값)
+    assert "참고값" in pooled["text"]
+    assert a["철근 D16"]["level"] == "주황" and "할증 여유 사용" in a["철근 D13"]["text"]
+
+
+def test_without_substitution_2108_alone_is_short():
+    s = Store()
+    y = yoseong.seed(s)
+    s.db.execute("UPDATE allocation SET pool=NULL")                      # 치환이 승인되지 않은 경우
+    a = {x["item"]: x for x in alerts.allocation_alerts(s, y["site"])}
     assert a["레미콘 25-21-08"]["balance"] == D("180") - D("193.125")
     assert "전량 미사용" in a["레미콘 25-18-08"]["text"]
-    assert a["철근 D16"]["level"] == "주황" and "할증 여유 사용" in a["철근 D13"]["text"]
 
 
 def test_design_section_has_small_margin():
@@ -169,7 +179,7 @@ def test_market_price_only_notifies(world):
 
 def test_home_shows_at_most_three_todos(world):
     h = alerts.home(world["s"], world["site"], "2026-11-15")
-    assert h["todo"] == ["오늘 일지 미작성"] and h["alerts"][0]["level"] == "빨강"
+    assert h["todo"] == ["오늘 일지 미작성"] and all(a["level"] != "빨강" for a in h["alerts"])
 
 
 # ---------- 제안 6: 말로 쓰는 일지 ----------

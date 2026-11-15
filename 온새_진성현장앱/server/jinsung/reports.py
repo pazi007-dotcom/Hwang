@@ -113,7 +113,7 @@ def allocation_status(store: Store, site_id: str,
             "design_qty": dec(a["design_qty"]), "alloc_qty": alloc,
             "cum_in": cum_in, "remaining_need": need, "balance": balance,
             "status": "부족 예상" if balance < 0 else "여유",
-            "tracked": a["supply"] != "관급자관급"})
+            "tracked": a["supply"] != "관급자관급", "pool": a["pool"]})
     return out
 
 

@@ -398,11 +398,11 @@ class Store:
                                          "sta_from": sta_from, "sta_to": sta_to})
 
     def add_allocation(self, site_id, item, unit, design_qty, alloc_qty,
-                       supply="도급자관급", spec="") -> str:
+                       supply="도급자관급", spec="", pool=None) -> str:
         return self._insert("allocation", {
             "site_id": site_id, "item": item, "spec": spec, "unit": unit,
             "design_qty": str(dec(design_qty)), "alloc_qty": str(dec(alloc_qty)),
-            "supply": supply})
+            "supply": supply, "pool": pool})
 
     def add_invoice(self, payee_id, work_date, kind, item, qty, amount, spec="",
                     photo_path=None) -> str:

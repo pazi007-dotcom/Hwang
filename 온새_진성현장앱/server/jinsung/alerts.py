@@ -47,8 +47,25 @@ def remaining_need(store: Store, site_id: str) -> dict:
 def allocation_alerts(store: Store, site_id: str) -> list[dict]:
     need = remaining_need(store, site_id)
     out = []
-    for a in reports.allocation_status(store, site_id, need or None):
-        if not a["tracked"]:
+    status = reports.allocation_status(store, site_id, need or None)
+    # 규격 치환 묶음(예: 버림 25-18-08 배정을 기초 25-21-08로 돌려 씀)은 합쳐서 한 줄로 본다
+    pools: dict[str, list[dict]] = {}
+    for a in status:
+        if a["pool"] and a["tracked"]:
+            pools.setdefault(a["pool"], []).append(a)
+    for name, rows in pools.items():
+        alloc = sum(r["alloc_qty"] for r in rows)
+        used = sum(r["cum_in"] + r["remaining_need"] for r in rows)
+        bal, unit = alloc - used, rows[0]["unit"]
+        specs = "·".join(r["spec"] for r in rows)
+        out.append({"kind": "자재 배정(치환 참고)", "level": "빨강" if bal < 0 else "초록",
+                    "item": f"{rows[0]['item']} {specs}", "balance": bal, "alloc_qty": alloc,
+                    "used": used, "pooled": True,
+                    "text": f"{rows[0]['item']} {specs} 치환 기준: 배정 {alloc:.0f}{unit}, 필요 {used:.1f}{unit}, "
+                            + (f"부족 {abs(bal):.1f}{unit}" if bal < 0 else f"여유 {bal:.1f}{unit}")
+                            + " (참고값 — 규격 변경은 발주처 협의 대상)"})
+    for a in status:
+        if not a["tracked"] or a["pool"]:
             continue
         used = a["cum_in"] + a["remaining_need"]
         if a["balance"] < 0:

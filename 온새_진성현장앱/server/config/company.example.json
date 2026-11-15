@@ -1,0 +1,11 @@
+{
+  "name": "",
+  "ceo": "",
+  "business_no": "",
+  "corporate_no": "",
+  "address": "",
+  "licenses": ["철근콘크리트공사업", "토공사업"],
+  "ceo_email": "",
+  "construction_capacity": null,
+  "note": "실제 값은 company.json 에 적는다. company.json 은 저장소에 올리지 않는다(.gitignore)."
+}

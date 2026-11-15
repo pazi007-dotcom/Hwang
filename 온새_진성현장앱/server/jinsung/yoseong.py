@@ -46,6 +46,8 @@ def seed(store: Store, with_exec: bool = True) -> dict:
         ids[key] = store.add_work_type(
             site, 9, name, design_length=LENGTH, design_params={**DESIGN, "part": part},
             exec_params={**EXEC, "part": part} if with_exec else None)
+    # 실행 단면: 버림(25-18-08) 배정을 기초(25-21-08)로 치환해서 쓴다 → 레미콘은 합쳐서 본다(참고용)
     for item, spec, unit, design, alloc in ALLOCATIONS:
-        store.add_allocation(site, item, unit, design, alloc, spec=spec)
+        store.add_allocation(site, item, unit, design, alloc, spec=spec,
+                             pool="레미콘" if with_exec and item == "레미콘" else None)
     return {"site": site, "base": ids["base"], "wall": ids["wall"]}

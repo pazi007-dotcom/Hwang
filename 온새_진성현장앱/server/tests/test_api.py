@@ -87,3 +87,13 @@ def test_token_guard(monkeypatch):
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     assert call(base, "/api/sites")[0] == 401
     httpd.shutdown()
+
+
+def test_company_info_and_license_check(tmp_path):
+    from jinsung import company
+    f = tmp_path / "company.json"
+    f.write_text('{"licenses": ["철근콘크리트공사업", "토공사업"], "ceo_email": "ceo@example.com"}', encoding="utf-8")
+    assert company.ceo_recipients(f) == ["ceo@example.com"]
+    assert company.can_bid(["토공사업"], f)["status"] == "확인 필요"
+    assert company.can_bid(["포장공사업"], f) == {"status": "불가", "missing": ["포장공사업"], "note": "면허 없음"}
+    assert company.load(tmp_path / "없음.json") == {}

@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS allocation (
     design_qty  TEXT NOT NULL,     -- 설계(내역) 수량, 할증 제외
     alloc_qty   TEXT NOT NULL,     -- 배정 수량
     supply      TEXT NOT NULL CHECK (supply IN ('도급자관급','관급자관급','사급')),
+    pool        TEXT,              -- 규격 치환 묶음. 같은 묶음은 배정량을 합쳐서 본다(발주처 승인 전에는 참고값)
     version     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
