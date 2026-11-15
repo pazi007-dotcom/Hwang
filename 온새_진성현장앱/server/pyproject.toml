@@ -1,0 +1,9 @@
+[project]
+name = "jinsung"
+version = "0.0.1"
+requires-python = ">=3.12"
+dependencies = ["openpyxl>=3.1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
