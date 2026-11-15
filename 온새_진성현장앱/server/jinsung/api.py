@@ -1,0 +1,217 @@
+"""집 PC 서버 (설계안 2장, 12장). 표준 라이브러리만 쓴다 — 설치할 것이 없다.
+
+실행:  python -m jinsung.api --db D:/진성현장/jinsung.db            (집 PC)
+       python -m jinsung.api --demo                                   (요성리 예시 자료로 둘러보기)
+
+접속 범위: 기본은 이 PC(127.0.0.1)만. 폰에서 쓰려면 Tailscale 주소로 --host 를 주고,
+환경 변수 JINSUNG_TOKEN 을 정해 두면 그 값을 아는 기기만 들어온다. 공유기 포트는 열지 않는다.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import tempfile
+import threading
+from decimal import Decimal
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from . import alerts, excel_report, mailer, reports, stations, sync, voice_log
+from .store import Store, StoreError
+from .templates import IMPLEMENTED
+
+WEB = Path(__file__).with_name("web")
+
+
+def _json(obj) -> bytes:
+    def default(o):
+        if isinstance(o, Decimal):
+            return float(o) if o != o.to_integral_value() else int(o)
+        if isinstance(o, (set, tuple)):
+            return list(o)
+        if isinstance(o, Path):
+            return str(o)
+        raise TypeError(type(o))
+    return json.dumps(obj, ensure_ascii=False, default=default).encode("utf-8")
+
+
+class App:
+    """요청 하나를 처리하는 순수 함수 모음 (HTTP 없이도 테스트할 수 있게)."""
+
+    def __init__(self, store: Store, out_dir: str | Path | None = None):
+        self.store = store
+        self.out_dir = Path(out_dir or tempfile.mkdtemp(prefix="jinsung_"))
+        self.lock = threading.Lock()
+
+    # ---- 읽기 ----
+    def sites(self, **_):
+        return [dict(r) for r in self.store.db.execute(
+            "SELECT id, name, site_type, client, contract_amount FROM site ORDER BY created_at")]
+
+    def payees(self, **_):
+        return [dict(r) for r in self.store.db.execute("SELECT id, name, payee_type FROM payee ORDER BY name")]
+
+    def home(self, site, today, **_):
+        s = self.store
+        month = today[:7]
+        bars = [stations.progress_bar(s, r["id"]) for r in s.db.execute(
+            "SELECT id FROM work_type WHERE site_id=? AND design_length IS NOT NULL ORDER BY created_at",
+            (site,))]
+        cost = s.db.execute(
+            "SELECT COALESCE(SUM(l.amount),0) AS a FROM input_line l JOIN work_log w ON w.id=l.log_id"
+            " WHERE w.site_id=? AND substr(w.work_date,1,7)=?", (site, month)).fetchone()["a"]
+        logs = [dict(r) for r in s.db.execute(
+            "SELECT w.work_date, w.content, w.no_work, COALESCE(SUM(l.amount),0) AS amount,"
+            " COUNT(l.id) AS lines FROM work_log w LEFT JOIN input_line l ON l.log_id=w.id"
+            " WHERE w.site_id=? GROUP BY w.id ORDER BY w.work_date DESC LIMIT 7", (site,))]
+        return {"site": s.get("site", site), "month_cost": cost, "bars": bars, "logs": logs,
+                "locked": s.is_locked(month), **alerts.home(s, site, today)}
+
+    def quantities(self, work_type, **_):
+        wt = self.store.get("work_type", work_type)
+        code = int(wt["template_code"])
+        if code not in IMPLEMENTED:
+            return {"name": wt["name"], "opened": False, "design": [], "exec": []}
+        base = {"length": wt["design_length"]} if wt["design_length"] else {}
+        design = IMPLEMENTED[code]({**json.loads(wt["design_params"] or "{}"), **base})
+        actual = IMPLEMENTED[code]({**json.loads(wt["exec_params"] or wt["design_params"] or "{}"), **base})
+        return {"name": wt["name"], "opened": True, "design": design["items"], "exec": actual["items"],
+                "checks": actual["checks"]}
+
+    def work_types(self, site, **_):
+        return [dict(r) for r in self.store.db.execute(
+            "SELECT id, name, template_code, design_length FROM work_type WHERE site_id=?", (site,))]
+
+    def precheck(self, month, until=None, **_):
+        return mailer.precheck(self.store, month, until)
+
+    def monthly_file(self, month, **_) -> Path:
+        return excel_report.build_monthly(self.store, month, self.out_dir,
+                                          corrected=self.store.is_locked(month))
+
+    # ---- 쓰기 ----
+    def voice_parse(self, site, text, **_):
+        return voice_log.parse(text, self.store, site)
+
+    def voice_commit(self, site, work_date, draft, payees, **_):
+        return voice_log.commit(self.store, site, work_date, draft, payees)
+
+    def no_work(self, site, work_date, weather="비", **_):
+        return {"log_id": self.store.mark_no_work(site, work_date, weather)}
+
+    def sync_push(self, changes, **_):
+        return [sync.apply_change(self.store, c) for c in changes]
+
+    def sync_pull(self, since, device, **_):
+        return sync.changes_since(self.store, int(since), exclude_device=device)
+
+
+GET = {"/api/sites": "sites", "/api/payees": "payees", "/api/home": "home",
+       "/api/quantities": "quantities", "/api/work_types": "work_types",
+       "/api/precheck": "precheck", "/api/sync/pull": "sync_pull"}
+POST = {"/api/voice/parse": "voice_parse", "/api/voice/commit": "voice_commit",
+        "/api/no_work": "no_work", "/api/sync/push": "sync_push"}
+
+
+def make_handler(app: App, token: str | None):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):  # 조용히
+            pass
+
+        def _send(self, code, body: bytes, ctype="application/json; charset=utf-8", extra=None):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _allowed(self) -> bool:
+            return not token or self.headers.get("X-Jinsung-Token") == token
+
+        def _run(self, name, args):
+            try:
+                with app.lock:
+                    result = getattr(app, name)(**args)
+                self._send(200, _json(result))
+            except (StoreError, ValueError, NotImplementedError) as exc:
+                self._send(400, _json({"error": str(exc)}))
+            except (KeyError, TypeError) as exc:
+                self._send(400, _json({"error": f"요청 값이 빠졌거나 잘못됐습니다: {exc}"}))
+
+        def do_GET(self):
+            url = urlparse(self.path)
+            args = {k: v[0] for k, v in parse_qs(url.query).items()}
+            if url.path in ("/", "/index.html"):
+                return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if not self._allowed():
+                return self._send(401, _json({"error": "허용되지 않은 기기입니다."}))
+            if url.path == "/api/report/monthly":
+                try:
+                    with app.lock:
+                        path = app.monthly_file(**args)
+                except (StoreError, ValueError, KeyError) as exc:
+                    return self._send(400, _json({"error": str(exc)}))
+                from urllib.parse import quote
+                return self._send(200, path.read_bytes(),
+                                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(path.name)}"})
+            if url.path in GET:
+                return self._run(GET[url.path], args)
+            self._send(404, _json({"error": "없는 주소입니다."}))
+
+        def do_POST(self):
+            url = urlparse(self.path)
+            if not self._allowed():
+                return self._send(401, _json({"error": "허용되지 않은 기기입니다."}))
+            if url.path not in POST:
+                return self._send(404, _json({"error": "없는 주소입니다."}))
+            try:
+                args = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            except json.JSONDecodeError:
+                return self._send(400, _json({"error": "JSON 형식이 아닙니다."}))
+            self._run(POST[url.path], args)
+    return Handler
+
+
+def demo_store() -> Store:
+    """요성리 예시 자료 (단가·업체·금액은 모두 예시)."""
+    from . import yoseong
+    from .seed_rates import load_draft_rates
+    s = Store(check_same_thread=False)
+    load_draft_rates(s)
+    s.add_rate("자재", "레미콘", "㎥", 98_000, spec="25-21-08", is_draft=True)
+    y = yoseong.seed(s)
+    dump, rmc, kim = s.create_payee("대성중기(예시)"), s.create_payee("가은레미콘(예시)"), \
+        s.create_payee("직영 인부(예시)", "직영")
+    for day, a, b in (("2026-11-10", 0, 15), ("2026-11-11", 15, 30), ("2026-11-12", 30, 45)):
+        s.add_input(y["site"], day, "인력", "보통인부", 4, kim, work_type_id=y["base"])
+        s.add_input(y["site"], day, "장비", "6W", 1, dump, work_type_id=y["base"])
+        s.add_input(y["site"], day, "자재", "레미콘", "5.5", rmc, spec="25-21-08",
+                    work_type_id=y["base"], sta_from=str(a), sta_to=str(b))
+        s.add_progress(y["site"], day, y["base"], b - a, "m", sta_from=str(a), sta_to=str(b))
+    s.add_invoice(dump, "2026-11-12", "장비", "6W", 1, 700_000)
+    reports.match_invoices(s, "2026-11")
+    return s
+
+
+def serve(store: Store, host="127.0.0.1", port=8765, out_dir=None):
+    app = App(store, out_dir)
+    httpd = ThreadingHTTPServer((host, port), make_handler(app, os.environ.get("JINSUNG_TOKEN")))
+    return httpd
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default="jinsung.db")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--demo", action="store_true")
+    a = ap.parse_args()
+    st = demo_store() if a.demo else Store(a.db, check_same_thread=False)
+    server = serve(st, a.host, a.port)
+    print(f"진성현장 서버: http://{a.host}:{a.port}  (끝내려면 Ctrl+C)")
+    server.serve_forever()

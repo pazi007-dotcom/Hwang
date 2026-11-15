@@ -90,6 +90,11 @@ def parse(text: str, store: Store, site_id: str) -> dict:
         i["unit"] = rate["unit"] if rate else None
         if rate is None:
             unknown.append(f"기준 단가 없음: {i['item']} {i['spec']}".strip())
+        last = store.db.execute(
+            "SELECT l.payee_id FROM input_line l JOIN work_log w ON w.id=l.log_id WHERE l.kind=?"
+            " AND l.item=? ORDER BY (w.site_id=?) DESC, w.work_date DESC, l.created_at DESC LIMIT 1",
+            (i["kind"], i["item"], site_id)).fetchone()
+        i["payee_id"] = last["payee_id"] if last else None     # '어제와 같이' 추천
     return {"text": text, "inputs": inputs, "progress": progress, "unknown": unknown,
             "tbm": "TBM" in text.upper() or "티비엠" in text}
 

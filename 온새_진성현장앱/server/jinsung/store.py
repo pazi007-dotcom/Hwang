@@ -76,8 +76,8 @@ def won(qty, unit_price) -> int:
 
 class Store:
     def __init__(self, path: str | Path = ":memory:", device: str = "pc",
-                 clock: Callable[[], datetime] = kst_now):
-        self.db = sqlite3.connect(str(path))
+                 clock: Callable[[], datetime] = kst_now, check_same_thread: bool = True):
+        self.db = sqlite3.connect(str(path), check_same_thread=check_same_thread)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA.read_text(encoding="utf-8"))
         self.device = device

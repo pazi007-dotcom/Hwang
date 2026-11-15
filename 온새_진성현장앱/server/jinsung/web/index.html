@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>진성현장</title>
+<style>
+/* 디자인 토큰 (설계안 10장). 색·글자·간격은 여기 한 곳에서만 정한다. */
+:root {
+  --bg: #0b1626; --card: #132238; --line: #26384f; --text: #eef3f9; --sub: #9db0c7;
+  --blue: #4c9dff; --ok: #3ecf8e; --warn: #f5a524; --bad: #ff6b6b;
+  --r: 12px; --pad: 16px; --gap: 12px; --group: 24px;
+  --f-title: 22px; --f-sub: 18px; --f-body: 16px; --f-note: 14px;
+}
+body.outdoor { /* 야외 모드: 밝은 바탕, 대비 7:1 이상 */
+  --bg: #ffffff; --card: #f3f6fa; --line: #8a9bb0; --text: #0b1626; --sub: #33475f;
+  --blue: #0b4fb3; --ok: #0a6b3d; --warn: #8a5200; --bad: #b00020;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--f-body)/1.5 Pretendard,
+  "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; padding-bottom: 96px; }
+header { padding: var(--pad); display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; }
+header h1 { font-size: var(--f-title); margin: 0; flex: 1 1 100%; }
+header select { flex: 1; }
+main { max-width: 960px; margin: 0 auto; padding: 0 var(--pad); display: grid; gap: var(--gap); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: var(--pad); }
+.card h2 { font-size: var(--f-sub); margin: 0 0 8px; }
+.note { color: var(--sub); font-size: var(--f-note); }
+.num { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 28px; }
+.unit { color: var(--sub); font-size: var(--f-note); font-weight: 400; margin-left: 4px; }
+.row { display: flex; gap: var(--gap); flex-wrap: wrap; }
+.row > * { flex: 1 1 140px; }
+.badge { display: inline-block; border: 1px solid currentColor; border-radius: 999px; padding: 2px 10px;
+  font-size: var(--f-note); font-weight: 700; margin-right: 8px; white-space: nowrap; }
+.빨강 { color: var(--bad); } .주황 { color: var(--warn); } .초록 { color: var(--ok); }
+.alert { display: flex; align-items: flex-start; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); }
+.alert:first-of-type { border-top: 0; }
+.bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--blue); }
+table { width: 100%; border-collapse: collapse; font-size: var(--f-note); }
+th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.diff td { font-weight: 700; }
+.scroll { overflow-x: auto; }
+button, select, input, textarea { font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r); padding: 0 var(--pad); min-height: 56px; width: 100%; }
+textarea { padding: var(--pad); min-height: 112px; }
+button { background: var(--blue); color: #fff; border: 0; font-weight: 700; cursor: pointer; }
+button.ghost, body.outdoor button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button:disabled { opacity: .45; }
+label { display: block; font-size: var(--f-note); color: var(--sub); margin: 12px 0 4px; }
+.steps { display: flex; gap: 6px; margin-bottom: 8px; }
+.steps i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--sub); }
+.steps i.on { background: var(--blue); border-color: var(--blue); }
+nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+  display: flex; }
+nav button, body.outdoor nav button { background: transparent; color: var(--sub); border-radius: 0; min-height: 64px; }
+nav button.on { color: var(--blue); box-shadow: inset 0 3px 0 var(--blue); }
+.msg { padding: 12px var(--pad); border-radius: var(--r); border: 1px solid var(--line); }
+section { display: none; gap: var(--gap); } section.on { display: grid; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">오늘 현장 보기</h1>
+  <select id="site" aria-label="현장"></select>
+  <button class="ghost" id="outdoor" style="width:auto">야외 모드</button>
+</header>
+<main>
+  <section id="home" class="on"></section>
+  <section id="log"></section>
+  <section id="qty"></section>
+  <section id="report"></section>
+</main>
+<nav>
+  <button data-tab="home" class="on">홈</button>
+  <button data-tab="log">일지</button>
+  <button data-tab="qty">물량</button>
+  <button data-tab="report">보고</button>
+</nav>
+<script>
+const TITLES = {home: "오늘 현장 보기", log: "오늘 일지 쓰기", qty: "물량 확인하기", report: "월말 보고 보내기"};
+const $ = (id) => document.getElementById(id);
+const won = (n) => Number(n).toLocaleString("ko-KR");
+const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);   // 한국 날짜
+function h(tag, attrs, ...kids) {              // 글자는 항상 textContent 로 넣는다
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v; else if (k.startsWith("on")) el[k] = v; else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid.nodeType ? kid : String(kid));
+  return el;
+}
+async function api(path, body) {
+  const res = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"},
+                                        body: JSON.stringify(body)} : undefined);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "요청을 처리하지 못했습니다.");
+  return data;
+}
+const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(k => k != null));
+const site = () => $("site").value;
+const steps = (n) => h("div", {class: "steps"}, [1, 2, 3].map(i => h("i", {class: i <= n ? "on" : ""})));
+const stat = (label, value, unit) => h("div", {}, h("div", {class: "note"}, label),
+  h("div", {class: "num"}, value, h("span", {class: "unit"}, unit)));
+
+async function showHome() {
+  const d = await api(`/api/home?site=${site()}&today=${today()}`);
+  const bars = d.bars.map(b => h("div", {style: "margin-top:12px"},
+    h("div", {class: "row"}, h("b", {}, b.work_type),
+      h("span", {class: "note", style: "text-align:right"},
+        `${b.done_length} / ${b.design_length} m · ${Math.round((b.rate || 0) * 100)}%`)),
+    h("div", {class: "bar"}, h("i", {style: `width:${(b.rate || 0) * 100}%`})),
+    h("div", {class: "note"}, b.todo.length ? "남은 구간: " + b.todo.map(t => t.join(" ~ ")).join(", ") : "전 구간 완료")));
+  put($("home"), 
+    h("div", {class: "card"}, h("h2", {}, d.site.name),
+      h("div", {class: "row"}, stat("이달 투입 원가", won(d.month_cost), "원"),
+        stat("일지", d.logs.length, "건(최근)"), stat("월 마감", d.locked ? "마감" : "진행 중", ""))),
+    h("div", {class: "card"}, h("h2", {}, "오늘 할 일"),
+      d.todo.length ? d.todo.map(t => h("div", {class: "alert"}, h("span", {class: "badge 주황"}, "할 일"), t))
+                    : h("div", {class: "note"}, "오늘 할 일이 없습니다.")),
+    h("div", {class: "card"}, h("h2", {}, "공정 막대 (측점 기준)"), bars.length ? bars : h("div", {class: "note"}, "공종이 없습니다.")),
+    h("div", {class: "card"}, h("h2", {}, "확인이 필요한 것"),
+      d.alerts.length ? d.alerts.map(a => h("div", {class: "alert"},
+        h("span", {class: "badge " + a.level}, a.kind), a.text)) : h("div", {class: "note"}, "경보가 없습니다.")),
+    h("div", {class: "card"}, h("h2", {}, "최근 일지"), h("div", {class: "scroll"}, h("table", {},
+      h("tr", {}, h("th", {}, "작업일"), h("th", {}, "내용"), h("th", {class: "r"}, "투입"), h("th", {class: "r"}, "금액(원)")),
+      d.logs.map(l => h("tr", {}, h("td", {}, l.work_date), h("td", {}, l.no_work ? "작업 없음" : (l.content || "")),
+        h("td", {class: "r"}, l.lines + "줄"), h("td", {class: "r"}, won(l.amount))))))));
+}
+
+let draft = null;
+async function showLog() {
+  const payees = await api("/api/payees");
+  const text = h("textarea", {id: "say", placeholder: "예: 보통인부 4명, 포크레인 06 한 대, No.3에서 No.5까지 기초 타설"});
+  const date = h("input", {type: "date", value: today()});
+  const out = h("div", {});
+  const parse = async () => {
+    try {
+      draft = await api("/api/voice/parse", {site: site(), text: text.value});
+    } catch (e) { return put(out, h("div", {class: "msg 빨강"}, e.message)); }
+    const picks = {};
+    const rows = draft.inputs.map(i => {
+      // 받는 곳: 그 항목을 마지막으로 넣었던 곳을 미리 고르고, 없으면 직접 고르게 한다
+      const sel = h("select", {}, h("option", {value: ""}, "받는 곳 고르기"),
+        payees.map(p => h("option", {value: p.id}, p.name)));
+      sel.value = i.payee_id || "";
+      sel.onchange = () => ready();
+      picks[i.item] = sel;
+      return h("tr", {}, h("td", {}, i.kind), h("td", {}, i.item + (i.spec ? " " + i.spec : "")),
+        h("td", {class: "r"}, i.qty + " " + (i.unit || "")),
+        h("td", {class: "r"}, i.unit_price == null ? "단가 없음" : won(i.qty * i.unit_price)), h("td", {}, sel));
+    });
+    const save = h("button", {}, "저장");
+    const ready = () => { save.disabled = draft.unknown.length > 0 || !draft.inputs.length
+      || Object.values(picks).some(s => !s.value); };
+    ready();
+    save.onclick = async () => {
+      const chosen = Object.fromEntries(Object.entries(picks).map(([k, s]) => [k, s.value]));
+      try {
+        await api("/api/voice/commit", {site: site(), work_date: date.value, draft, payees: chosen});
+        put(out, steps(3), h("div", {class: "msg 초록"}, `${date.value} 일지에 저장했습니다. 다음: 사진 추가`));
+        text.value = "";
+      } catch (e) { out.prepend(h("div", {class: "msg 빨강"}, e.message)); }
+    };
+    put(out, steps(2), h("h2", {}, "확인"),
+      h("div", {class: "scroll"}, h("table", {}, h("tr", {}, h("th", {}, "종류"), h("th", {}, "항목"), h("th", {class: "r"}, "수량"),
+        h("th", {class: "r"}, "금액(원)"), h("th", {}, "받는 곳")), rows)),
+      draft.progress ? h("p", {}, h("span", {class: "badge 초록"}, "시공"),
+        `${draft.progress.work_type || "공종 미정"} ${draft.progress.label} · ${draft.progress.length} m`) : null,
+      draft.unknown.map(u => h("div", {class: "alert"}, h("span", {class: "badge 빨강"}, "확인 필요"), u)), save);
+  };
+  put($("log"), h("div", {class: "card"}, steps(1),
+    h("label", {}, "작업일 (오늘이 기본. 밀린 일지는 날짜를 바꿔서 입력)"), date,
+    h("label", {}, "말하거나 적기"), text,
+    h("div", {style: "margin-top:12px"}, h("button", {onclick: parse}, "확인으로"))),
+    h("div", {class: "card"}, out));
+}
+
+async function showQty() {
+  const wts = await api(`/api/work_types?site=${site()}`);
+  const sel = h("select", {}, wts.map(w => h("option", {value: w.id}, w.name)));
+  const out = h("div", {});
+  const load = async () => {
+    if (!sel.value) return put(out, h("div", {class: "note"}, "공종이 없습니다."));
+    const q = await api(`/api/quantities?work_type=${sel.value}`);
+    if (!q.opened) return put(out, h("div", {class: "note"}, "이 공종은 내역 수량 그대로 관리합니다."));
+    const key = (i) => i.name + "|" + i.spec;
+    const dmap = Object.fromEntries(q.design.map(i => [key(i), i]));
+    const emap = Object.fromEntries(q.exec.map(i => [key(i), i]));
+    const keys = [...new Set([...q.design, ...q.exec].map(key))];
+    const fmt = (v) => v == null ? "-" : Number(v).toLocaleString("ko-KR", {maximumFractionDigits: 3});
+    put(out, h("div", {class: "scroll"}, h("table", {},
+      h("tr", {}, h("th", {}, "항목"), h("th", {class: "r"}, "설계"), h("th", {class: "r"}, "실행"), h("th", {}, "단위"), h("th", {}, "계산식(실행)")),
+      keys.map(k => { const d = dmap[k], e = emap[k], i = e || d;
+        const diff = (d ? d.qty : 0) !== (e ? e.qty : 0);
+        return h("tr", {class: diff ? "diff" : ""}, h("td", {}, i.name + (i.spec ? " " + i.spec : "")),
+          h("td", {class: "r"}, fmt(d && d.qty)), h("td", {class: "r"}, fmt(e && e.qty)), h("td", {}, i.unit),
+          h("td", {class: "note"}, (e || d).formula)); }))),
+      h("h2", {style: "margin-top:16px"}, "조립 검토"),
+      q.checks.map(c => h("div", {class: "alert"}, h("span", {class: "badge " + (c.ok ? "초록" : "빨강")}, c.ok ? "정상" : "확인"),
+        c.name + " — " + c.note)));
+  };
+  sel.onchange = load;
+  put($("qty"), h("div", {class: "card"}, h("label", {}, "공종"), sel,
+    h("p", {class: "note"}, "굵은 줄 = 설계와 실행 수량이 다른 항목")), h("div", {class: "card"}, out));
+  await load();
+}
+
+async function showReport() {
+  const month = h("input", {type: "month", value: today().slice(0, 7)});
+  const out = h("div", {});
+  const check = async () => {
+    const c = await api(`/api/precheck?month=${month.value}`);
+    put(out, steps(2), h("h2", {}, "확인"),
+      h("div", {class: "row"}, stat("결제 합계", won(c.total), "원"), stat("받는 곳", c.payees, "곳"), stat("차이", c.diffs, "건")),
+      h("p", {class: "note"}, "대상 기간 " + c.period + (c.corrected ? " · 이미 보낸 달(정정본으로 만들어집니다)" : "")),
+      c.sites.map(s => h("div", {class: "alert"}, h("span", {class: "badge " + (s.missing.length ? "주황" : "초록")}, s.site),
+        `일지 ${s.written}건` + (s.missing.length ? `, 미작성 ${s.missing.length}일 (${s.missing.slice(0, 6).map(d => d.slice(5)).join(", ")}${s.missing.length > 6 ? " …" : ""})` : ""))),
+      h("a", {href: `/api/report/monthly?month=${month.value}`},
+        h("button", {style: "margin-top:12px"}, "Excel 내려받기 (월말보고_" + month.value + ".xlsx)")));
+  };
+  put($("report"), h("div", {class: "card"}, steps(1), h("label", {}, "보고할 달"), month,
+    h("div", {style: "margin-top:12px"}, h("button", {onclick: check}, "확인으로"))), h("div", {class: "card"}, out));
+}
+
+const SHOW = {home: showHome, log: showLog, qty: showQty, report: showReport};
+async function go(tab) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === tab));
+  $("title").textContent = TITLES[tab];
+  try { await SHOW[tab](); } catch (e) { $(tab).replaceChildren(h("div", {class: "msg 빨강"}, e.message)); }
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => go(b.dataset.tab));
+$("outdoor").onclick = () => document.body.classList.toggle("outdoor");
+$("site").onchange = () => go(document.querySelector("nav button.on").dataset.tab);
+api("/api/sites").then(list => {
+  $("site").replaceChildren(...list.map(s => h("option", {value: s.id}, s.name)));
+  go("home");
+});
+</script>
+</body>
+</html>
