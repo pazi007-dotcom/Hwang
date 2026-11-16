@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 **/config/company.json
 *.apk
+온새_진성현장앱/app/build/

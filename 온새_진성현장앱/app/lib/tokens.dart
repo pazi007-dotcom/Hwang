@@ -35,6 +35,7 @@ class Tokens {
         borderRadius: BorderRadius.circular(radius), borderSide: BorderSide(color: line));
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Pretendard',
       colorScheme: scheme,
       scaffoldBackgroundColor: bg,
       textTheme: TextTheme(

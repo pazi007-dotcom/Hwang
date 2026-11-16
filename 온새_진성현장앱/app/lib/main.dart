@@ -148,7 +148,7 @@ class _ShellState extends State<Shell> {
       body: SafeArea(
         child: Column(children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(Tokens.pad, 0, Tokens.pad, Tokens.gap),
+            padding: const EdgeInsets.fromLTRB(Tokens.pad, 8, Tokens.pad, Tokens.gap),
             child: Row2(children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
@@ -240,14 +240,23 @@ Widget bigNumber(BuildContext context, String label, String value, String unit, 
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: Theme.of(context).textTheme.bodySmall),
-        Text.rich(TextSpan(children: [
-          TextSpan(
-              text: value,
-              style: TextStyle(
-                  fontSize: 28, fontWeight: FontWeight.w700, color: t.text,
-                  fontFeatures: const [FontFeature.tabularFigures()])),
-          TextSpan(text: ' $unit', style: TextStyle(fontSize: Tokens.fNote, color: t.sub)),
-        ])),
+        // 금액이 길어도 줄바꿈되지 않고 칸 안에서 작아진다(숫자가 쪼개지면 잘못 읽힘)
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                  text: value,
+                  style: TextStyle(
+                      fontSize: 28, fontWeight: FontWeight.w700, color: t.text,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+              TextSpan(text: ' $unit', style: TextStyle(fontSize: Tokens.fNote, color: t.sub)),
+            ]),
+            maxLines: 1,
+            softWrap: false,
+          ),
+        ),
       ],
     );
 
@@ -409,7 +418,7 @@ class HomePage extends StatelessWidget {
           ]),
           const SizedBox(height: Tokens.gap),
           Section(title: '이달', children: [
-            Row(children: [
+            Row2(children: [
               Expanded(child: bigNumber(context, '투입 원가', wonText(d['cost'] as int), '원', t)),
               Expanded(child: bigNumber(context, '월 마감', (d['locked'] as bool) ? '마감' : '진행 중', '', t)),
             ]),
@@ -960,7 +969,7 @@ class _PayPageState extends State<PayPage> {
           ]),
           const SizedBox(height: Tokens.gap),
           Section(title: '이달 결제', children: [
-            Row(children: [
+            Row2(children: [
               Expanded(child: bigNumber(context, '이달 투입', wonText(total), '원', t)),
               Expanded(child: bigNumber(context, '줄 돈(잔액)', wonText(due), '원', t)),
             ]),

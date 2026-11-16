@@ -153,10 +153,8 @@ extension Ledger on Store {
       final n = names[l['payee_id']];
       if (n != null && !out.contains(n)) out.add(n);
     }
-    if (item == null || item.isEmpty) {
-      for (final n in names.values) {
-        if (!out.contains(n)) out.add(n);
-      }
+    if (out.isEmpty && item != null && item.isNotEmpty) {
+      return recentPayees(kind); // 처음 쓰는 항목이면 이 종류에 썼던 받는 곳
     }
     return out;
   }
