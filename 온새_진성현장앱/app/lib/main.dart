@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'device.dart';
 import 'ledger.dart';
 import 'payout.dart';
 import 'roster.dart';
@@ -82,52 +83,130 @@ class _ShellState extends State<Shell> {
     });
   }
 
-  /// 접수: 답사 전이라도 이름과 구분만 넣고 시작한다. 그날 일지에 [접수] 줄이 함께 남는다.
+  /// 접수: 구분 → 이름 → 위치 → 연락처(폰에서 고르기) → 지시사항 → 구분별 체크리스트. 그날 일지에 [접수] 줄이 남는다.
   Future<void> receiveJob() async {
     final name = TextEditingController();
     final inst = TextEditingController();
     final cname = TextEditingController();
     final cphone = TextEditingController();
+    final addr = TextEditingController();
     var type = jobTypes.first;
-    final ok = await showDialog<bool>(
+    Here? here;
+    var hereMsg = '';
+    final checked = <String>{};
+    final ok = await showModalBottomSheet<bool>(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          title: const Text('공사 건 접수'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: '공사 이름')),
-              const SizedBox(height: Tokens.gap),
-              DropdownButtonFormField<String>(
-                initialValue: type,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: '구분'),
-                items: [for (final j in jobTypes) DropdownMenuItem(value: j, child: Text(j))],
-                onChanged: (v) => setD(() => type = v ?? type),
-              ),
-              const SizedBox(height: Tokens.gap),
-              TextField(controller: inst, maxLines: 3, decoration: const InputDecoration(labelText: '지시사항·확인사항')),
-              const SizedBox(height: Tokens.gap),
-              TextField(controller: cname, decoration: const InputDecoration(labelText: '연락처 이름')),
-              const SizedBox(height: Tokens.gap),
-              TextField(controller: cphone, keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(labelText: '전화번호')),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('접수')),
-          ],
-        ),
+        builder: (ctx, setD) {
+          final sub = Theme.of(ctx).textTheme.bodySmall;
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(Tokens.pad),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('공사 건 접수', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: Tokens.gap),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final j in jobTypes)
+                    ChoiceChip(
+                      key: ValueKey('jt_$j'),
+                      label: Text(j),
+                      selected: type == j,
+                      onSelected: (_) => setD(() {
+                        type = j;
+                        checked.clear();
+                      }),
+                    ),
+                ]),
+                const SizedBox(height: Tokens.gap),
+                TextField(key: const ValueKey('rc_name'), controller: name,
+                    decoration: const InputDecoration(labelText: '공사 이름')),
+                const SizedBox(height: Tokens.gap),
+                TextField(key: const ValueKey('rc_addr'), controller: addr,
+                    decoration: const InputDecoration(labelText: '공사 위치 (주소·마을·도로명 등)')),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Expanded(child: Text(hereMsg.isEmpty ? '현장에 있으면 「지금 위치」로 좌표를 남깁니다.' : hereMsg, style: sub)),
+                  TextButton.icon(
+                    key: const ValueKey('rc_here'),
+                    icon: const Icon(Icons.my_location, size: 18),
+                    label: const Text('지금 위치'),
+                    onPressed: () async {
+                      setD(() => hereMsg = '위치 찾는 중…');
+                      try {
+                        here = await DeviceKit.here();
+                        setD(() => hereMsg = '좌표 저장: ${here!.lat.toStringAsFixed(5)}, ${here!.lon.toStringAsFixed(5)}');
+                      } on StoreError catch (e) {
+                        setD(() => hereMsg = e.message);
+                      } catch (_) {
+                        setD(() => hereMsg = '위치를 못 잡았습니다. 주소만 적어 주세요.');
+                      }
+                    },
+                  ),
+                ]),
+                const SizedBox(height: Tokens.gap),
+                OutlinedButton.icon(
+                  key: const ValueKey('rc_contact'),
+                  icon: const Icon(Icons.contacts_outlined, size: 18),
+                  label: const Text('폰 연락처에서 고르기'),
+                  onPressed: () async {
+                    try {
+                      final c = await DeviceKit.pickContact();
+                      if (c != null) {
+                        setD(() {
+                          cname.text = c.name;
+                          cphone.text = c.phone;
+                        });
+                      }
+                    } catch (_) {
+                      if (ctx.mounted) showMessage(ctx, '연락처를 열지 못했습니다. 직접 적어 주세요.');
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
+                Row2(children: [
+                  Expanded(child: TextField(key: const ValueKey('rc_cname'), controller: cname,
+                      decoration: const InputDecoration(labelText: '연락처 이름'))),
+                  Expanded(child: TextField(key: const ValueKey('rc_cphone'), controller: cphone,
+                      keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: '전화번호'))),
+                ]),
+                const SizedBox(height: Tokens.gap),
+                TextField(key: const ValueKey('rc_inst'), controller: inst, maxLines: 3,
+                    decoration: const InputDecoration(labelText: '지시사항')),
+                const SizedBox(height: Tokens.gap),
+                Text('$type 체크리스트', style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text('이미 한 것은 체크. 안 한 것은 할 일로 남아 홈에서 알려 줍니다.', style: sub),
+                for (final c in firstChecks[type]!)
+                  CheckboxListTile(
+                    key: ValueKey('ck_$c'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: checked.contains(c),
+                    title: Text(c),
+                    onChanged: (v) => setD(() => v == true ? checked.add(c) : checked.remove(c)),
+                  ),
+                const SizedBox(height: Tokens.gap),
+                FilledButton(key: const ValueKey('rc_ok'), onPressed: () => Navigator.pop(ctx, true), child: const Text('접수')),
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+              ]),
+            ),
+          );
+        },
       ),
     );
     if (ok != true) return;
     try {
       final id = await widget.store.receive(name.text, type, workDateOf(DateTime.now()),
-          instructions: inst.text, contactName: cname.text, contactPhone: cphone.text);
+          instructions: inst.text, contactName: cname.text, contactPhone: cphone.text,
+          address: addr.text, lat: here?.lat, lon: here?.lon, checked: checked);
       siteId = id;
       await reload();
-      if (mounted) showMessage(context, '접수했습니다. 오늘 일지에 함께 남겼습니다.');
+      if (mounted) {
+        final left = firstChecks[type]!.length - checked.length;
+        showMessage(context, '접수했습니다. 오늘 일지에 남겼습니다.${left > 0 ? ' 확인할 것 $left개는 할 일로.' : ''}');
+      }
     } on StoreError catch (e) {
       if (mounted) showMessage(context, e.message);
     }
@@ -392,6 +471,11 @@ class HomePage extends StatelessWidget {
               if (site['job_type'] != null) Badge2(site['job_type'] as String, t.blue),
               if (site['planned_start'] != null) Text('시작 예정 ${site['planned_start']}'),
             ]),
+            if ((site['address'] ?? '') != '' || site['gps_lat'] != null)
+              Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('위치: ${site['address'] ?? ''}'
+                      '${site['gps_lat'] != null ? ' (${(site['gps_lat'] as num).toStringAsFixed(5)}, ${(site['gps_lon'] as num).toStringAsFixed(5)})' : ''}')),
             if ((site['instructions'] ?? '') != '')
               Padding(padding: const EdgeInsets.only(top: 8), child: Text(site['instructions'] as String)),
             if ((site['status_reason'] ?? '') != '')

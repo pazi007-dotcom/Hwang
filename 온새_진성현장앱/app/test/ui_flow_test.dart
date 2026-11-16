@@ -1,6 +1,7 @@
 // 사람이 누르는 순서 그대로 화면을 조작하는 시험 (기준 정보가 하나도 없는 새 폰에서 시작).
 // 화면이 넘치면(RenderFlex overflow) 시험이 실패한다 → 화면 잘림 검사를 겸한다.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jinsung_app/device.dart';
 import 'package:jinsung_app/ledger.dart';
 import 'package:jinsung_app/main.dart';
 import 'package:jinsung_app/payout.dart';
@@ -14,6 +15,15 @@ Future<void> scrollTo(WidgetTester t, Finder f) async {
 }
 
 Future<void> tapText(WidgetTester t, String text) async {
+  if (find.text(text).evaluate().isEmpty) {
+    // 화면 밖이면 아래로, 없으면 위로 찾아 간다
+    try {
+      await t.scrollUntilVisible(find.text(text), 200, scrollable: find.byType(Scrollable).first, maxScrolls: 40);
+    } catch (_) {
+      await t.scrollUntilVisible(find.text(text), -200, scrollable: find.byType(Scrollable).first, maxScrolls: 80);
+    }
+    await t.pumpAndSettle();
+  }
   final f = find.text(text).last;
   await t.ensureVisible(f);
   await t.pumpAndSettle();
@@ -28,11 +38,35 @@ Future<void> field(WidgetTester t, String key, String value) async {
   await t.pumpAndSettle();
 }
 
-Future<void> receive(WidgetTester t, String name) async {
+Future<void> receive(WidgetTester t, String name, {String? type, bool full = false}) async {
   await t.tap(find.text('+ 접수'));
   await t.pumpAndSettle();
-  await t.enterText(find.widgetWithText(TextField, '공사 이름'), name);
-  await t.tap(find.widgetWithText(FilledButton, '접수'));
+  if (type != null) {
+    await t.tap(find.byKey(ValueKey('jt_$type')));
+    await t.pumpAndSettle();
+  }
+  await t.enterText(find.byKey(const ValueKey('rc_name')), name);
+  if (full) {
+    // 위치: 주소 + 지금 위치, 연락처: 폰에서 고르기, 체크리스트 하나 체크
+    DeviceKit.here = () async => (lat: 36.72381, lon: 128.11654);
+    DeviceKit.pickContact = () async => (name: '문경시 건설과 박주무관', phone: '054-550-6000');
+    await t.enterText(find.byKey(const ValueKey('rc_addr')), '점촌동 123-4 앞 도로');
+    await t.tap(find.byKey(const ValueKey('rc_here')));
+    await t.pumpAndSettle();
+    expect(find.textContaining('좌표 저장: 36.72381'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('rc_contact')));
+    await t.pumpAndSettle();
+    expect(find.text('054-550-6000'), findsOneWidget);
+    final ck = find.byKey(const ValueKey('ck_현장 위치·진입로 확인'));
+    await t.ensureVisible(ck);
+    await t.pumpAndSettle();
+    await t.tap(ck);
+    await t.pumpAndSettle();
+  }
+  final ok = find.byKey(const ValueKey('rc_ok'));
+  await t.ensureVisible(ok);
+  await t.pumpAndSettle();
+  await t.tap(ok);
   await t.pumpAndSettle();
 }
 
@@ -64,9 +98,15 @@ void main() {
 
       // 1) 공사 건 두 개 접수 (큰 공사 + 긴급)
       await receive(t, '요성리 용배수로');
-      await receive(t, '점촌 긴급복구');
+      await receive(t, '점촌 긴급복구', type: '긴급', full: true);
       final sites = await store.db.all('site');
       expect(sites.length, 2);
+      final em = sites.firstWhere((x) => x['name'] == '점촌 긴급복구');
+      expect([em['job_type'], em['address'], em['gps_lat']], ['긴급', '점촌동 123-4 앞 도로', 36.72381]);
+      expect((await store.db.all('contact')).single['phone'], '054-550-6000');
+      final tasks = (await store.db.all('site_task')).where((x) => x['site_id'] == em['id']).toList();
+      expect(tasks.length, 4);
+      expect([for (final x in tasks) if (x['done'] == 1) x['title']], ['현장 위치·진입로 확인']);
 
       // 2) 일지 탭: 현재 현장은 방금 접수한 '점촌 긴급복구'
       await t.tap(find.text('일지'));

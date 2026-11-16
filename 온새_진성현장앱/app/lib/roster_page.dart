@@ -125,7 +125,8 @@ class _RosterEditorState extends State<RosterEditor> {
     final labels = {
       'payee': kind == '인력' ? '이름 (한 사람씩 — 일당·세금이 사람별)' : '업체',
       'item': kind == '인력' ? '직종 (보통인부, 형틀목공 …)' : kind == '장비' ? '기종 (6W, 덤프 25톤 …)' : '항목',
-      'spec': '규격 (선택)', 'unit': '단위', 'price': '단가 (원)', 'phone': '연락처 (선택)', 'memo': '메모 (차량번호 등)',
+      'spec': kind == '장비' ? '규격 (선택, 0.6㎥ 등)' : '규격 (선택)', 'unit': '단위 (㎥, 톤, 개 …)',
+      'price': kind == '인력' ? '일당 (원)' : kind == '장비' ? '단가 (원, 위에서 고른 단위당)' : '단가 (원, 모르면 비움)', 'phone': '연락처 (선택)', 'memo': '메모 (차량번호 등)',
       'bank': '은행 (월말 이체용)', 'account': '계좌번호', 'holder': '예금주 (이름과 같으면 비움)',
     };
     return Padding(
@@ -146,7 +147,19 @@ class _RosterEditorState extends State<RosterEditor> {
                       c['unit']!.text = defaultUnit[kind]!;
                     }),
           ),
-          for (final k in labels.keys) ...[
+          for (final k in labels.keys.where((k) => !(kind == '인력' && (k == 'spec' || k == 'unit')) && !(kind == '장비' && k == 'unit'))) ...[
+            if (k == 'price' && kind == '장비') ...[
+              const SizedBox(height: Tokens.gap),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final u in const ['일', '대', '시간', '회'])
+                  ChoiceChip(
+                    key: ValueKey('re_unit_$u'),
+                    label: Text('$u 단위'),
+                    selected: c['unit']!.text == u,
+                    onSelected: (_) => setState(() => c['unit']!.text = u),
+                  ),
+              ]),
+            ],
             const SizedBox(height: Tokens.gap),
             TextField(
               key: ValueKey('re_$k'),
@@ -159,6 +172,7 @@ class _RosterEditorState extends State<RosterEditor> {
           FilledButton(
             key: const ValueKey('re_save'),
             onPressed: () {
+              if (kind == '인력') c['unit']!.text = '인'; // 작업자는 단위가 늘 '인'
               RosterEditor.result = {'kind': kind, for (final e in c.entries) e.key: e.value.text};
               Navigator.pop(context, true);
             },

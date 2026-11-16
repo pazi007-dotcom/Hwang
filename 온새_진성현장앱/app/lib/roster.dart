@@ -63,7 +63,8 @@ extension Roster on Store {
       required String unit, required Object unitPrice, String spec = '', String? phone, String? memo}) async {
     if (!kinds.contains(kind)) throw StoreError('종류는 $kinds 중 하나입니다.');
     if (item.trim().isEmpty) throw StoreError('직종·기종·자재 이름을 적어 주세요.');
-    final price = int.tryParse(unitPrice.toString().replaceAll(',', '').trim());
+    final raw = unitPrice.toString().replaceAll(',', '').trim();
+    final price = raw.isEmpty && kind == '자재' ? 0 : int.tryParse(raw);
     if (price == null || price < 0) throw StoreError('단가를 숫자로 적어 주세요.');
     final payeeId = await ensurePayee(payee, kind: kind);
     final it = item.trim(), sp = spec.trim();

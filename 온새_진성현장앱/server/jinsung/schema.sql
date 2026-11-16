@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS site (
     contract_amount INTEGER,
     start_date      TEXT,
     end_date        TEXT,
+    address         TEXT,                 -- 공사 위치(주소·설명)
     gps_lat         REAL,
     gps_lon         REAL,
     gps_radius_m    REAL,

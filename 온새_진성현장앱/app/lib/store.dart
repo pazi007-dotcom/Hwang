@@ -138,27 +138,35 @@ class Store {
   // ---------- 접수 → 보류 / 취소 / 진행 → 완공 (서버 intake.py 와 같은 규칙) ----------
   /// 접수. 이름과 구분만 있으면 된다. 접수하는 순간 그날 일지에 [접수] 한 줄이 남는다.
   Future<String> receive(String name, String jobType, String receivedDate,
-      {String? instructions, String? contactName, String? contactPhone}) async {
+      {String? instructions, String? contactName, String? contactPhone, String? address, double? lat, double? lon,
+      Set<String> checked = const {}}) async {
     if (!jobTypes.contains(jobType)) throw StoreError('접수 구분은 $jobTypes 중 하나입니다.');
     final day = parseWorkDate(receivedDate);
     final siteType = (jobType == '입찰' || jobType == '공사') ? '정식' : (jobType == '민원' || jobType == '기타') ? '보수기타' : '긴급수의';
     final note = (instructions == null || instructions.trim().isEmpty) ? null : instructions.trim();
     final site = await createSite(name, siteType: siteType, status: '접수', jobType: jobType,
-        receivedDate: day, instructions: note);
+        receivedDate: day, instructions: note, lat: lat, lon: lon);
+    if (address != null && address.trim().isNotEmpty) {
+      final row = await mustGet('site', site);
+      await update('site', site, row['version'] as int, {'address': address.trim()});
+    }
     if (contactName != null && contactName.trim().isNotEmpty) {
       await insert('contact', {
         'site_id': site, 'name': contactName.trim(), 'role': null,
         'phone': (contactPhone ?? '').trim().isEmpty ? null : contactPhone!.trim(), 'note': null,
       });
     }
+    // 구분별 체크리스트: 접수하면서 이미 확인한 것은 완료로
     for (final title in firstChecks[jobType]!) {
-      await addTask(site, '확인', title, dueDate: day);
+      final t = await addTask(site, '확인', title, dueDate: day);
+      if (checked.contains(title)) await checkTask(t, day);
     }
     final logId = await logFor(site, day);
     final row = await mustGet('work_log', logId);
     // 접수 기록은 특이사항(note)에 남긴다. 작업 내용(content)은 소장이 쓰는 칸이라 비워 둔다.
     await update('work_log', logId, row['version'] as int,
-        {'note': '[접수·$jobType] ${name.trim()}${note == null ? '' : ' — $note'}'});
+        {'note': '[접수·$jobType] ${name.trim()}${(address ?? '').trim().isEmpty ? '' : ' · 위치 ${address!.trim()}'}'
+            '${note == null ? '' : ' — $note'}'});
     return site;
   }
 
