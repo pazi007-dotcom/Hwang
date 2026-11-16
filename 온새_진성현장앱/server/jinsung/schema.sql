@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS input_line (
     sta_from     TEXT,
     sta_to       TEXT,
     share_group  TEXT,
+    note         TEXT,              -- 한 줄 메모 (이름, 작업 위치 등)
     version      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL

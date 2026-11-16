@@ -80,8 +80,26 @@ class Store:
         self.db = sqlite3.connect(str(path), check_same_thread=check_same_thread)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA.read_text(encoding="utf-8"))
+        self._migrate()
         self.device = device
         self.clock = clock
+
+    def _migrate(self) -> None:
+        """예전 자료 파일에 없는 칸을 더한다(지우거나 바꾸지 않음)."""
+        import re
+        text = SCHEMA.read_text(encoding="utf-8")
+        for table, body in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", text, re.S):
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for line in body.splitlines():
+                m = re.match(r"\s+(\w+)\s+(TEXT|INTEGER|REAL)\b(.*?)(,)?\s*(--.*)?$", line)
+                if not m or m.group(1) in have or m.group(1).upper() in ("PRIMARY", "UNIQUE"):
+                    continue
+                extra = m.group(3).strip()
+                if "NOT NULL" in extra and "DEFAULT" not in extra:
+                    continue          # 기본값 없는 필수 칸은 자동으로 더할 수 없다
+                extra = re.sub(r"REFERENCES \w+\(\w+\)|CHECK \(.*\)", "", extra).strip()
+                with self.db:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {m.group(1)} {m.group(2)} {extra}")
 
     # ---------- 공통 ----------
     def _now(self) -> str:
