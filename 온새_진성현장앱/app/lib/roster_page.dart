@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'ledger.dart';
 import 'main.dart';
+import 'payout.dart';
 import 'roster.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -22,13 +23,19 @@ class _RosterPageState extends State<RosterPage> {
   Store get s => widget.store;
 
   Future<void> _edit([RosterEntry? r]) async {
+    final payee = r == null ? null : await s.mustGet('payee', r.row['payee_id'] as String);
+    if (!mounted) return;
     final ok = await showModalBottomSheet<bool>(
-        context: context, isScrollControlled: true, builder: (_) => RosterEditor(entry: r));
+        context: context, isScrollControlled: true, builder: (_) => RosterEditor(entry: r, payee: payee));
     if (ok != true) return;
     final v = RosterEditor.result!;
     try {
       await s.saveRoster(kind: v['kind']!, payee: v['payee']!, item: v['item']!, unit: v['unit']!,
           unitPrice: v['price']!, spec: v['spec']!, phone: v['phone'], memo: v['memo']);
+      final payeeId = await s.ensurePayee(v['payee']!, kind: v['kind']!);
+      if (v['bank']!.trim().isNotEmpty || v['account']!.trim().isNotEmpty || r != null) {
+        await s.setPayeeInfo(payeeId, bank: v['bank'], account: v['account'], holder: v['holder']);
+      }
       setState(() => refresh++);
       await widget.onChanged();
       if (mounted) showMessage(context, '명부에 저장했습니다: ${v['payee']} · ${v['item']}');
@@ -90,8 +97,9 @@ class _RosterPageState extends State<RosterPage> {
 }
 
 class RosterEditor extends StatefulWidget {
-  const RosterEditor({super.key, this.entry});
+  const RosterEditor({super.key, this.entry, this.payee});
   final RosterEntry? entry;
+  final Map<String, Object?>? payee;
   static Map<String, String>? result;
   @override
   State<RosterEditor> createState() => _RosterEditorState();
@@ -107,14 +115,18 @@ class _RosterEditorState extends State<RosterEditor> {
     'price': TextEditingController(text: widget.entry == null ? '' : '${widget.entry!.price}'),
     'phone': TextEditingController(text: (widget.entry?.row['phone'] ?? '') as String),
     'memo': TextEditingController(text: (widget.entry?.row['memo'] ?? '') as String),
+    'bank': TextEditingController(text: widget.payee?['bank'] as String? ?? ''),
+    'account': TextEditingController(text: widget.payee?['account_no'] as String? ?? ''),
+    'holder': TextEditingController(text: widget.payee?['holder'] as String? ?? ''),
   };
 
   @override
   Widget build(BuildContext context) {
     final labels = {
-      'payee': kind == '인력' ? '이름 (또는 팀)' : '업체',
+      'payee': kind == '인력' ? '이름 (한 사람씩 — 일당·세금이 사람별)' : '업체',
       'item': kind == '인력' ? '직종 (보통인부, 형틀목공 …)' : kind == '장비' ? '기종 (6W, 덤프 25톤 …)' : '항목',
-      'spec': '규격 (선택)', 'unit': '단위', 'price': '단가 (원)', 'phone': '연락처 (선택)', 'memo': '메모 (계좌·차량번호 등)',
+      'spec': '규격 (선택)', 'unit': '단위', 'price': '단가 (원)', 'phone': '연락처 (선택)', 'memo': '메모 (차량번호 등)',
+      'bank': '은행 (월말 이체용)', 'account': '계좌번호', 'holder': '예금주 (이름과 같으면 비움)',
     };
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -139,7 +151,7 @@ class _RosterEditorState extends State<RosterEditor> {
             TextField(
               key: ValueKey('re_$k'),
               controller: c[k],
-              keyboardType: k == 'price' ? TextInputType.number : k == 'phone' ? TextInputType.phone : null,
+              keyboardType: k == 'price' ? TextInputType.number : (k == 'phone' || k == 'account') ? TextInputType.phone : null,
               decoration: InputDecoration(labelText: labels[k]),
             ),
           ],

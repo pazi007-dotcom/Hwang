@@ -14,7 +14,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter as CL
 
-from . import alerts, reports
+from . import alerts, payout, reports
 from .stations import progress_bar
 from .store import KINDS, Store
 
@@ -82,10 +82,7 @@ def _carry_over(store: Store, payee_id: str, month: str) -> int:
     billed = store.db.execute(
         "SELECT COALESCE(SUM(l.amount),0) AS a FROM input_line l JOIN work_log w ON w.id=l.log_id"
         " WHERE l.payee_id=? AND w.work_date < ?", (payee_id, start)).fetchone()["a"]
-    paid = store.db.execute(
-        "SELECT COALESCE(SUM(amount),0) AS a FROM payment WHERE payee_id=? AND month < ?",
-        (payee_id, month)).fetchone()["a"]
-    return billed - paid
+    return billed - payout.settled_paid(store, payee_id, month, before=True)
 
 
 def _site_progress(store: Store, site_id: str):
@@ -185,8 +182,7 @@ def build_monthly(store: Store, month: str, out_dir: str | Path, corrected: bool
                fmt=WON, bold=bold)
         _c(ws, r, c_total, f"=SUM({CL(3)}{r}:{CL(2 + n_site)}{r})" if n_site else 0, fmt=WON, bold=True)
         _c(ws, r, c_carry, _carry_over(store, p["payee_id"], month), fmt=WON)
-        paid = store.db.execute("SELECT COALESCE(SUM(amount),0) AS a FROM payment WHERE payee_id=?"
-                                " AND month=?", (p["payee_id"], month)).fetchone()["a"]
+        paid = payout.settled_paid(store, p["payee_id"], month)
         _c(ws, r, c_paid, paid, fmt=WON)
         _c(ws, r, c_due, f"={CL(c_total)}{r}+{CL(c_carry)}{r}-{CL(c_paid)}{r}", fmt=WON, bold=True)
         _c(ws, r, c_inv, inv, align="center", bold=bold)
@@ -262,8 +258,35 @@ def build_monthly(store: Store, month: str, out_dir: str | Path, corrected: bool
         r += 1
     _page(ws)
 
+    # ---------- 이체목록: 받는 사람·업체 1곳 = 이체 1건 (작업자는 사람마다, 일당 원천세) ----------
+    ws = wb.create_sheet("이체목록", 1)
+    _c(ws, 1, 1, f"{month} 이체 목록 (누구에게 얼마)", bold=True, size=13, border=False)
+    _c(ws, 2, 1, "작업자: 하루 일당 15만원 초과분 × 2.7% 소득세, 그 10% 지방소득세(세무사 확인용 기본값). "
+                 "장비·자재: '부가세별도'면 10% 더함.", size=9, border=False)
+    cols = ["구분", "받는 곳", "은행", "계좌번호", "예금주", "이달 금액", "이월", "소득세", "지방소득세",
+            "부가세", "이미 보냄", "보낼 돈"]
+    _header(ws, 4, cols, [9, 16, 10, 20, 14, 14, 12, 11, 11, 12, 13, 15])
+    pos = payout.month_payouts(store, month)
+    r = 5
+    for o in pos:
+        vals = [o["group"], o["name"], o["bank"] or "계좌 없음", o["account_no"], o["holder"] or o["name"],
+                o["total"], o["carry"], o["income_tax"], o["local_tax"], o["vat"], o["cash_paid"]]
+        for j, v in enumerate(vals, 1):
+            _c(ws, r, j, v, fmt=WON if j >= 6 else None, bold=(j == 3 and not o["bank"]))
+        _c(ws, r, 12, f"=F{r}+G{r}-H{r}-I{r}+J{r}-K{r}", fmt=WON, bold=True)
+        r += 1
+    _c(ws, r, 1, "합계", bold=True, align="center")
+    for j in range(2, 6):
+        _c(ws, r, j, None)
+    for j in range(6, 13):
+        _c(ws, r, j, f"=SUM({CL(j)}5:{CL(j)}{r - 1})" if pos else 0, fmt=WON, bold=True)
+    for g_i, g in enumerate(["작업자", "장비", "자재·외주"]):
+        _c(ws, r + 2 + g_i, 2, g, border=False)
+        _c(ws, r + 2 + g_i, 12, f'=SUMIFS(L5:L{max(r - 1, 5)},A5:A{max(r - 1, 5)},"{g}")', fmt=WON, border=False)
+    _page(ws)
+
     # ---------- 출역표: 사람·장비 1줄 × 1~31일 (공수·일수), 결제 근거 ----------
-    ws = wb.create_sheet("출역표", 2)
+    ws = wb.create_sheet("출역표", 3)
     last_day = int(end[-2:])
     _c(ws, 1, 1, f"{month} 출역표 (사람·장비별 날짜별 수량, 두 현장 이상인 날은 합계)", bold=True, size=13, border=False)
     head = ["받는 곳", "항목", "단위", *[str(d) for d in range(1, last_day + 1)], "합계", "일수", "금액"]

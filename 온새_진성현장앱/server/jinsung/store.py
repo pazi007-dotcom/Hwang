@@ -398,10 +398,10 @@ class Store:
             "sta_from": sta_from, "sta_to": sta_to, "gps_lat": gps_lat, "gps_lon": gps_lon,
             "caption": caption})
 
-    def mark_paid(self, payee_id, month, amount, paid_date) -> str:
+    def mark_paid(self, payee_id, month, amount, paid_date, deduct=0, vat=0) -> str:
         datetime.strptime(month, "%Y-%m")
         return self._insert("payment", {"payee_id": payee_id, "month": month,
-                                        "amount": int(amount),
+                                        "amount": int(amount), "deduct": int(deduct), "vat": int(vat),
                                         "paid_date": parse_work_date(paid_date)})
 
     def mark_invoice_error(self, invoice_id: str) -> None:

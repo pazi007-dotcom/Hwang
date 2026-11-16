@@ -47,7 +47,7 @@ def test_monthly_excel_sheets_and_formulas(world, tmp_path):
     path = excel_report.build_monthly(s, "2026-11", tmp_path)
     assert path.name == "월말보고_2026-11.xlsx"
     wb = load_workbook(path)
-    assert wb.sheetnames == ["결제요약", "현장별투입", "출역표", "인력", "장비", "자재", "거래명세서", "자재배정대비"]
+    assert wb.sheetnames == ["결제요약", "이체목록", "현장별투입", "출역표", "인력", "장비", "자재", "거래명세서", "자재배정대비"]
     ws = wb["결제요약"]
     assert [c.value for c in ws[5]][:5] == ["받는 곳", "구분", "요성리 용배수로", "점촌 긴급복구", "합계"]
     assert ws["A6"].value == "대성중기" and ws["A6"].font.bold            # 금액 큰 순 + 차이는 굵게
@@ -283,3 +283,46 @@ def test_attendance_sheet_and_yearly_report(world, tmp_path):
     vals = {(r[0], r[4]): r for r in y["사람장비별"].iter_rows(min_row=4, values_only=True) if r[0]}
     q = vals[("김반장", "수량")]
     assert (q[4 + 10], q[4 + 11]) == (1, 4)     # 10월 1공수, 11월 4공수 (F열=1월)
+
+
+# ---------- 이체 목록: 사람마다 한 건, 일당 원천세, 부가세 별도 (폰과 같은 숫자) ----------
+def test_payout_list_per_person_matches_phone(world, tmp_path):
+    from datetime import date, timedelta
+    from jinsung import payout
+    s, site, emg = world["s"], world["site"], world["emg"]
+    lee = s.create_payee("이영수", "개인")
+    pk1, pk2 = s.create_payee("박목수", "개인"), s.create_payee("정목수", "개인")
+    dump = world["dump"]
+    s.update("payee", dump, s.get("payee", dump)["version"],
+             {"bank": "국민", "account_no": "123-45-678", "holder": "대성중기(주)", "pay_rule": "부가세별도"})
+    s.update("payee", world["kim"], s.get("payee", world["kim"])["version"], {"bank": "농협", "account_no": "351-1111-2222-33"})
+    days = [d for d in (date(2026, 11, 2) + timedelta(i) for i in range(29)) if d.weekday() < 5 and d.day != 10]
+    assert len(days) == 20
+    for d in days:
+        ds = d.isoformat()
+        s.add_input(site, ds, "인력", "보통인부", 1, world["kim"], unit_price=187000)
+        s.add_input(site, ds, "인력", "보통인부", 1, lee, unit_price=187000)
+        s.add_input(site, ds, "인력", "형틀목공", 1, pk1, unit_price=230000)
+        s.add_input(site, ds, "인력", "형틀목공", 1, pk2, unit_price=230000)
+        s.add_input(site, ds, "장비", "6W", 1, dump, unit_price=680000)
+    s.add_input(emg, "2026-11-10", "인력", "보통인부", "0.5", lee, unit_price=187000)
+    s.add_input(site, "2026-11-10", "인력", "보통인부", "0.5", lee, unit_price=187000)
+    s.add_input(site, "2026-11-10", "인력", "보통인부", 1, world["kim"], unit_price=187000)
+    po = {o["name"]: o for o in payout.month_payouts(s, "2026-11")}
+    assert [po["김반장"][k] for k in ("total", "work_days", "income_tax", "local_tax", "transfer")] == \
+        [3927000, 21, 20970, 2090, 3903940]
+    assert po["이영수"]["income_tax"] == 20970                 # 0.5+0.5 같은 날 = 하루 일당
+    assert po["박목수"]["transfer"] == 4552480 and po["박목수"]["bank"] == ""
+    assert (po["대성중기"]["vat"], po["대성중기"]["transfer"]) == (1360000, 14960000)
+    # 보냄 기록 → 12월 이월 0
+    s.mark_paid(world["kim"], "2026-11", 3903940, "2026-12-05", deduct=23060)
+    s.mark_paid(dump, "2026-11", 14960000, "2026-12-05", vat=1360000)
+    po = {o["name"]: o for o in payout.month_payouts(s, "2026-11")}
+    assert po["김반장"]["transfer"] == 0 and po["대성중기"]["transfer"] == 0
+    dec = {o["name"]: o for o in payout.month_payouts(s, "2026-12")}
+    assert "김반장" not in dec and "대성중기" not in dec
+    wb = load_workbook(excel_report.build_monthly(s, "2026-11", tmp_path))
+    assert wb.sheetnames[:2] == ["결제요약", "이체목록"]
+    rows = {r[1]: r for r in wb["이체목록"].iter_rows(min_row=5, values_only=True) if r[0] in ("작업자", "장비", "자재·외주")}
+    assert rows["김반장"][2:4] == ("농협", "351-1111-2222-33") and rows["박목수"][2] == "계좌 없음"
+    assert rows["김반장"][11].startswith("=F")

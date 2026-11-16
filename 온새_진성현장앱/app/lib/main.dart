@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'ledger.dart';
+import 'payout.dart';
 import 'roster.dart';
 import 'roster_page.dart';
 import 'row_db.dart';
@@ -1074,6 +1075,7 @@ class _PayPageState extends State<PayPage> {
 
   Future<Map<String, dynamic>> _load() async => {
         'pay': await s.monthPayments(month),
+        'payouts': await s.monthPayouts(month),
         'sites': await s.monthSites(month),
         'locked': await s.isLocked(month),
         'year': await s.yearByPayee(month.substring(0, 4)),
@@ -1121,6 +1123,41 @@ class _PayPageState extends State<PayPage> {
     }
   }
 
+  Future<void> _sent(Payout o) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${o.name}에게 ${wonText(o.transfer)}원 보냄'),
+        content: Text('${o.accountText}\n${o.breakdown}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아니요')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('보냈음')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await s.recordPayout(o, month, workDateOf(DateTime.now()));
+      setState(() => refresh++);
+      await widget.onChanged();
+      if (mounted) showMessage(context, '${o.name} ${wonText(o.transfer)}원 보낸 것으로 기록했습니다.');
+    } on StoreError catch (e) {
+      if (mounted) showMessage(context, e.message);
+    }
+  }
+
+  Future<void> _account(Payout o) async {
+    if (await editPayeeInfo(context, s, o.payeeId, o.name) == true) {
+      setState(() => refresh++);
+      await widget.onChanged();
+    }
+  }
+
+  Future<void> _copyPayout() async {
+    await Clipboard.setData(ClipboardData(text: await s.payoutText(month)));
+    if (mounted) showMessage(context, '이체 목록을 복사했습니다.');
+  }
+
   Future<void> _copy() async {
     final text = await s.paymentText(month);
     await Clipboard.setData(ClipboardData(text: text));
@@ -1134,6 +1171,7 @@ class _PayPageState extends State<PayPage> {
       key: ValueKey('pay$month$refresh'),
       future: _load(),
       builder: (context, snap) {
+        if (snap.hasError) return Center(child: Text('결제 집계를 못 불러왔습니다: ${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final pay = snap.data!['pay'] as List<PayeeTotal>;
         final sites = snap.data!['sites'] as List<SiteTotal>;
@@ -1142,6 +1180,13 @@ class _PayPageState extends State<PayPage> {
         final yy = month.substring(0, 4);
         final total = pay.fold<int>(0, (a, p) => a + p.total);
         final due = pay.fold<int>(0, (a, p) => a + p.balance);
+        final payouts = snap.data!['payouts'] as List<Payout>;
+        final groups = <String, List<Payout>>{};
+        for (final o in payouts) {
+          groups.putIfAbsent(o.group, () => []).add(o);
+        }
+        final sendSum = payouts.fold<int>(0, (a, o) => a + (o.transfer > 0 ? o.transfer : 0));
+        final noAccount = payouts.where((o) => o.transfer > 0 && !o.hasAccount).length;
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
           Row2(children: [
             SizedBox(width: 56, child: OutlinedButton(onPressed: () => setState(() => month = monthShift(month, -1)), child: const Text('◀'))),
@@ -1149,53 +1194,60 @@ class _PayPageState extends State<PayPage> {
             SizedBox(width: 56, child: OutlinedButton(onPressed: () => setState(() => month = monthShift(month, 1)), child: const Text('▶'))),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '이달 결제', children: [
-            Row2(children: [
-              Expanded(child: bigNumber(context, '이달 투입', wonText(total), '원', t)),
-              Expanded(child: bigNumber(context, '줄 돈(잔액)', wonText(due), '원', t)),
-            ]),
-            Text('받는 곳 ${pay.length}곳${(snap.data!['locked'] as bool) ? ' · 마감된 달' : ''}', style: Theme.of(context).textTheme.bodySmall),
+          Section(title: '이달 보낼 돈 (사람·업체별 이체)', children: [
+            bigNumber(context, '보낼 돈 합계', wonText(sendSum), '원', t),
+            Text(
+                [
+                  for (final g in groups.keys)
+                    '$g ${groups[g]!.length}${g == '작업자' ? '명' : '곳'}',
+                  if (noAccount > 0) '계좌 없음 $noAccount',
+                  if (snap.data!['locked'] as bool) '마감된 달',
+                ].join(' · '),
+                style: Theme.of(context).textTheme.bodySmall),
+            Text('이달 투입 ${wonText(total)}원 · 일지 기준 남은 돈 ${wonText(due)}원', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
-            OutlinedButton(onPressed: _copy, child: const Text('결제 요약 복사 (카톡·문자용)')),
+            Row2(children: [
+              Expanded(child: FilledButton(onPressed: _copyPayout, child: const Text('이체 목록 복사'))),
+              Expanded(child: OutlinedButton(onPressed: _copy, child: const Text('결제 요약 복사'))),
+            ]),
           ]),
-          const SizedBox(height: Tokens.gap),
-          Section(title: '받는 곳별 (줄 돈 큰 순)', children: [
-            if (pay.isEmpty) Text('이 달에는 투입이 없습니다.', style: Theme.of(context).textTheme.bodySmall),
-            for (final p in pay) ...[
-              InkWell(
-                onTap: () => _detail(p),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Expanded(child: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700))),
-                      Text('${wonText(p.balance)}원',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
+          if (payouts.isEmpty) ...[
+            const SizedBox(height: Tokens.gap),
+            Text('이 달에는 투입이 없습니다.', style: Theme.of(context).textTheme.bodySmall),
+          ],
+          for (final g in groups.keys) ...[
+            const SizedBox(height: Tokens.gap),
+            Section(title: '$g ${groups[g]!.length}${g == '작업자' ? '명' : '곳'} · ${wonText(groups[g]!.fold<int>(0, (a, o) => a + (o.transfer > 0 ? o.transfer : 0)))}원', children: [
+              for (final o in groups[g]!) ...[
+                InkWell(
+                  key: ValueKey('po_${o.name}'),
+                  onTap: () => _detail(o.p),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Expanded(child: Text(o.name, style: const TextStyle(fontWeight: FontWeight.w700))),
+                        Text('${wonText(o.transfer)}원',
+                            style: TextStyle(fontWeight: FontWeight.w700, color: o.transfer > 0 ? t.text : t.sub,
+                                fontFeatures: const [FontFeature.tabularFigures()])),
+                      ]),
+                      Text(o.accountText, style: TextStyle(color: o.hasAccount ? t.text : t.warn)),
+                      Text(o.breakdown, style: Theme.of(context).textTheme.bodySmall),
+                      if (o.p.bySite.length > 1)
+                        for (final e in o.p.bySite.entries)
+                          Text('  ${e.key}  ${wonText(e.value)}', style: Theme.of(context).textTheme.bodySmall),
                     ]),
-                    Text(
-                        [
-                          p.kinds.join('·'),
-                          if (p.manDays > 0) '${fmtQty(p.manDays)}공수',
-                          for (final e in p.equipment.entries)
-                            '${e.key.split('|')[0]} ${fmtQty(e.value)}${e.key.split('|')[1]}',
-                          '${p.lines}줄',
-                        ].join(' · '),
-                        style: Theme.of(context).textTheme.bodySmall),
-                    for (final e in p.bySite.entries)
-                      Text('  ${e.key}  ${wonText(e.value)}', style: Theme.of(context).textTheme.bodySmall),
-                    if (p.carry != 0 || p.paid != 0)
-                      Text('  이달 ${wonText(p.total)} + 이월 ${wonText(p.carry)} − 지급 ${wonText(p.paid)}',
-                          style: Theme.of(context).textTheme.bodySmall),
-                  ]),
+                  ),
                 ),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(onPressed: () => _pay(p), child: const Text('지급 기록')),
-              ),
-              const Divider(height: 1),
-            ],
-          ]),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  TextButton(onPressed: () => _account(o), child: Text(o.hasAccount ? '계좌·방식' : '계좌 넣기')),
+                  if (o.transfer > 0) TextButton(key: ValueKey('sent_${o.name}'), onPressed: () => _sent(o), child: const Text('보냈음')),
+                  TextButton(onPressed: () => _pay(o.p), child: const Text('일부만')),
+                ]),
+                const Divider(height: 1),
+              ],
+            ]),
+          ],
           const SizedBox(height: Tokens.gap),
           Section(title: '현장별 한 달 집계', children: [
             if (sites.isEmpty) Text('이 달에는 일지가 없습니다.', style: Theme.of(context).textTheme.bodySmall),
@@ -1358,4 +1410,50 @@ class _SyncPageState extends State<SyncPage> {
       if (mounted) showMessage(context, e.message);
     }
   }
+}
+
+
+/// 받는 곳 계좌·지급 방식 고치기 (결제 탭·명부에서 같이 씀).
+Future<bool?> editPayeeInfo(BuildContext context, Store s, String payeeId, String name) async {
+  final p = await s.mustGet('payee', payeeId);
+  if (!context.mounted) return null;
+  final bank = TextEditingController(text: (p['bank'] ?? '') as String);
+  final acc = TextEditingController(text: (p['account_no'] ?? '') as String);
+  final holder = TextEditingController(text: (p['holder'] ?? name) as String);
+  var rule = (p['pay_rule'] as String?) ?? (p['payee_type'] == '개인' ? '일용' : '그대로');
+  final ok = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, set) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(Tokens.pad),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('$name 계좌·지급 방식', style: Theme.of(ctx).textTheme.titleMedium),
+            const SizedBox(height: Tokens.gap),
+            TextField(key: const ValueKey('pi_bank'), controller: bank, decoration: const InputDecoration(labelText: '은행')),
+            const SizedBox(height: Tokens.gap),
+            TextField(key: const ValueKey('pi_acc'), controller: acc, keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: '계좌번호')),
+            const SizedBox(height: Tokens.gap),
+            TextField(key: const ValueKey('pi_holder'), controller: holder, decoration: const InputDecoration(labelText: '예금주')),
+            const SizedBox(height: Tokens.gap),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final r in payRules)
+                ChoiceChip(label: Text(payRuleLabel[r]!), selected: rule == r, onSelected: (_) => set(() => rule = r)),
+            ]),
+            const SizedBox(height: 4),
+            Text('일용: 하루 일당 15만원 넘는 부분의 2.7%를 소득세로, 그 10%를 지방소득세로 뗍니다.',
+                style: Theme.of(ctx).textTheme.bodySmall),
+            const SizedBox(height: Tokens.gap),
+            FilledButton(key: const ValueKey('pi_save'), onPressed: () => Navigator.pop(ctx, true), child: const Text('저장')),
+          ]),
+        ),
+      ),
+    ),
+  );
+  if (ok != true) return ok;
+  await s.setPayeeInfo(payeeId, bank: bank.text, account: acc.text, holder: holder.text, rule: rule);
+  return true;
 }

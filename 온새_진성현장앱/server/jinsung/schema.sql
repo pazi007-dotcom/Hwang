@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS payee (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     payee_type  TEXT NOT NULL CHECK (payee_type IN ('개인','업체','직영')),
+    bank        TEXT,                      -- 월말 이체용
+    account_no  TEXT,
+    holder      TEXT,                      -- 예금주 (비우면 이름)
+    pay_rule    TEXT,                      -- 일용(소득세 뗌) / 부가세별도 / 그대로. 비우면 개인=일용
     version     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
@@ -275,7 +279,9 @@ CREATE TABLE IF NOT EXISTS payment (
     id          TEXT PRIMARY KEY,
     payee_id    TEXT NOT NULL REFERENCES payee(id),
     month       TEXT NOT NULL,             -- 어느 달 청구분에 대한 지급인지
-    amount      INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,          -- 실제로 보낸 돈
+    deduct      INTEGER NOT NULL DEFAULT 0, -- 뗀 세금(소득세+지방소득세)
+    vat         INTEGER NOT NULL DEFAULT 0, -- 더한 부가세
     paid_date   TEXT NOT NULL,
     version     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,

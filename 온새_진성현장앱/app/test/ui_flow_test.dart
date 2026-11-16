@@ -118,6 +118,9 @@ void main() {
       expect(pay['대성중기']!.bySite, {'점촌 긴급복구': 340000, '요성리 용배수로': 340000});
       expect(pay['김반장']!.total, 187000);
       expect(pay['김반장']!.manDays, 1);
+      expect(find.text('작업자 2명 · 374,000원'), findsOneWidget); // 김반장·이씨 따로. 하루 소득세 999원 → 1,000원 미만이라 안 뗌
+      expect(find.text('김반장'), findsOneWidget);
+      await scrollTo(t, find.byKey(const ValueKey('po_대성중기')));
       expect(find.text('대성중기'), findsOneWidget);
       expect(find.text('680,000원'), findsWidgets);
       final sitesTotal = {for (final s in await store.monthSites(month)) s.name: s};
@@ -125,10 +128,11 @@ void main() {
       expect(sitesTotal['요성리 용배수로']!.materials, {'레미콘 25-21-08|㎥': 6.5});
 
       // 6) 지급 기록 → 잔액
-      await scrollTo(t, find.text('지급 기록').first);
-      await t.tap(find.text('지급 기록').first);
+      final sent = find.byKey(const ValueKey('sent_대성중기'));
+      await scrollTo(t, sent);
+      await t.tap(sent);
       await t.pumpAndSettle();
-      await t.tap(find.widgetWithText(FilledButton, '확인'));
+      await t.tap(find.widgetWithText(FilledButton, '보냈음'));
       await t.pumpAndSettle();
       final after = {for (final p in await store.monthPayments(month)) p.name: p};
       expect(after['대성중기']!.paid, 680000); // 줄 돈이 가장 큰 곳(맨 위)을 전액 지급

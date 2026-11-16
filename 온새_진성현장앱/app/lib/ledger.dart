@@ -314,6 +314,8 @@ extension Ledger on Store {
     return out;
   }
 
+  Future<List<Rec>> monthLinesAll(String month) => _monthLines(month);
+
   Future<List<Rec>> linesOfPayee(String payeeId, String month) async =>
       (await _monthLines(month)).where((l) => l['payee_id'] == payeeId).toList();
 
@@ -351,7 +353,9 @@ extension Ledger on Store {
     for (final p in await db.all('payment')) {
       final m = p['month'] as String;
       final target = m.compareTo(month) < 0 ? paidBefore : (m == month ? paidNow : null);
-      target?.update(p['payee_id'] as String, (v) => v + (p['amount'] as int), ifAbsent: () => p['amount'] as int);
+      // 정산액 = 보낸 돈 + 뗀 세금 − 더한 부가세 (일지 금액 기준)
+      final settled = (p['amount'] as int) + ((p['deduct'] ?? 0) as int) - ((p['vat'] ?? 0) as int);
+      target?.update(p['payee_id'] as String, (v) => v + settled, ifAbsent: () => settled);
     }
     for (final id in {...billed.keys}) {
       final carry = (billed[id] ?? 0) - (paidBefore[id] ?? 0);
