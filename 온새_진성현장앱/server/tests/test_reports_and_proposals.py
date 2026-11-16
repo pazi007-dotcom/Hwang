@@ -326,3 +326,45 @@ def test_payout_list_per_person_matches_phone(world, tmp_path):
     rows = {r[1]: r for r in wb["이체목록"].iter_rows(min_row=5, values_only=True) if r[0] in ("작업자", "장비", "자재·외주")}
     assert rows["김반장"][2:4] == ("농협", "351-1111-2222-33") and rows["박목수"][2] == "계좌 없음"
     assert rows["김반장"][11].startswith("=F")
+
+
+# ---------- 폰에서 「대표님께 보고 메일 보내기」 한 번 → 집 PC가 보고서를 만들어 대표 메일로 ----------
+def test_phone_request_sends_report_mail_to_ceo(world, tmp_path):
+    from jinsung import api, sync
+    fill_november(world)
+    s = world["s"]
+    sent = []
+    app = api.App(s, tmp_path, transport=sent.append, recipients=["ceo@example.com"])
+    phone = Store(device="phone")
+    sync.pull(phone, lambda since: s.db and sync.changes_since(s, since, exclude_device="phone"))
+    phone._insert("pay_request", {"month": "2026-11", "amount": 1, "payee_count": 1,
+                                  "requested_at": "2026-11-30T18:00:00+09:00", "status": "보낼 요청"})
+    sync.push(phone, app.sync_push)
+    assert len(sent) == 1
+    mail = sent[0]
+    assert mail["recipients"] == ["ceo@example.com"] and mail["subject"] == "월말보고 2026-11"
+    assert mail["attachments"][0].endswith("월말보고_2026-11.xlsx")
+    assert "결제 요청 — 누구에게 얼마" in mail["html"] and "김반장" in mail["html"]
+    assert "계좌 확인 필요" in mail["html"]
+    req = s.db.execute("SELECT * FROM pay_request").fetchone()
+    assert req["status"] == "전송됨" and "ceo@example.com" in req["result"]
+    # 결과가 폰으로 돌아온다
+    sync.pull(phone, lambda since: sync.changes_since(s, since, exclude_device="phone"))
+    assert phone.db.execute("SELECT status FROM pay_request").fetchone()["status"] == "전송됨"
+    assert s.is_locked("2026-11")                       # 보낸 달은 마감
+
+
+def test_phone_request_without_mail_setup_waits_in_outbox(world, tmp_path):
+    from jinsung import api, sync
+    fill_november(world)
+    s = world["s"]
+    app = api.App(s, tmp_path, transport=None, recipients=["ceo@example.com"])
+    app.transport = None
+    phone = Store(device="phone")
+    sync.pull(phone, lambda since: sync.changes_since(s, since, exclude_device="phone"))
+    phone._insert("pay_request", {"month": "2026-11", "amount": 1, "payee_count": 1,
+                                  "requested_at": "2026-11-30T18:00:00+09:00", "status": "보낼 요청"})
+    sync.push(phone, app.sync_push)
+    req = s.db.execute("SELECT * FROM pay_request").fetchone()
+    assert req["status"] == "보낼 함 대기"
+    assert s.db.execute("SELECT COUNT(*) AS n FROM mail_outbox WHERE status='대기'").fetchone()["n"] == 1

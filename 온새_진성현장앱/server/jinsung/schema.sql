@@ -322,6 +322,7 @@ CREATE TABLE IF NOT EXISTS mail_outbox (
     body        TEXT NOT NULL,
     recipients  TEXT NOT NULL,
     attachments TEXT NOT NULL DEFAULT '[]',
+    html        TEXT,                       -- 보기 좋은 보고 본문 (없으면 글자 본문만)
     status      TEXT NOT NULL DEFAULT '대기' CHECK (status IN ('대기','전송됨','실패')),
     tries       INTEGER NOT NULL DEFAULT 0,
     last_error  TEXT,
@@ -425,6 +426,9 @@ CREATE TABLE IF NOT EXISTS pay_request (
     amount       INTEGER NOT NULL,
     payee_count  INTEGER NOT NULL,
     requested_at TEXT NOT NULL,
+    status       TEXT,                     -- 보낼 요청 → 전송됨 / 보낼 함 대기 / 실패 (집 PC가 적음)
+    result       TEXT,                     -- 보낸 곳·파일 또는 실패 사유
+    sent_at      TEXT,
     version      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL

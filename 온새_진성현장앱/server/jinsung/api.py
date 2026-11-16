@@ -40,8 +40,10 @@ def _json(obj) -> bytes:
 class App:
     """요청 하나를 처리하는 순수 함수 모음 (HTTP 없이도 테스트할 수 있게)."""
 
-    def __init__(self, store: Store, out_dir: str | Path | None = None):
+    def __init__(self, store: Store, out_dir: str | Path | None = None, transport=None, recipients=None):
         self.store = store
+        self.transport = transport if transport is not None else mailer.default_transport()
+        self.recipients = recipients
         self.out_dir = Path(out_dir or tempfile.mkdtemp(prefix="jinsung_"))
         self.lock = threading.Lock()
 
@@ -157,6 +159,12 @@ class App:
                                         (site_id,)).fetchone()
             if row and row["status"] == "진행" and row["planned_start"]:
                 schedule.plan(self.store, site_id)
+        # 폰에서 「대표님께 보고 메일 보내기」 → 여기서 보고서를 만들어 보낸다
+        for c, r in zip(changes, results):
+            if c["table_name"] == "pay_request" and r["status"] == "적용" and "보낼 요청" in (c["data_json"] or ""):
+                rid = self.store.db.execute("SELECT real_id FROM id_alias WHERE alias_id=?", (c["row_id"],)).fetchone()
+                mailer.send_requested(self.store, rid["real_id"] if rid else c["row_id"], self.out_dir,
+                                      self.transport, self.recipients)
         return results
 
     def sync_pull(self, since, device, **_):

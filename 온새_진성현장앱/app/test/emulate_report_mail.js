@@ -39,13 +39,8 @@ const OUT = process.argv[2]; let n = 0; const notes = [];
     await tap('tab', '결제 요청'); await p.waitForTimeout(1000); await shot('결제 탭 위 (보낼 돈)');
     await scroll(450); await shot('작업자 사람별');
     await scroll(-3000);
-    await tap('button', '결제 요청 복사 (사장님 카톡)'); await p.waitForTimeout(900);
-    const clip = await p.evaluate(() => navigator.clipboard.readText()).catch(e => 'ERR ' + e);
-    notes.push('---- 복사된 결제 요청 ----\n' + clip);
-    await shot('요청 올린 뒤');
-    await p.waitForTimeout(2600);
-    await tap('button', '결제 끝남');  await p.waitForTimeout(600); await shot('결제 끝남 확인창');
-    await p.getByRole('button', { name: '결제 끝남', exact: true }).last().click(); await p.waitForTimeout(900); await shot('지급 기록 뒤');
+    await tap('button', '대표님께 보고 메일 보내기'); await p.waitForTimeout(700); await shot('보내기 확인창');
+    await tap('button', '보내기', true); await p.waitForTimeout(1200); await shot('보낸 뒤 (집 PC 대기)');
   } catch (e) { notes.push('!! 막힘: ' + e.message); await shot('막힌 화면'); }
   notes.push('페이지 오류: ' + JSON.stringify(errs)); console.log(notes.join('\n')); await b.close();
 })();

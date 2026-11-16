@@ -2,6 +2,8 @@
 // 실행: 서버를 `python -m jinsung.api --demo --port 8765` 로 띄운 뒤
 //       flutter test --dart-define=JINSUNG_SERVER=http://127.0.0.1:8765 test/server_link_test.dart
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jinsung_app/payout.dart';
+import 'package:jinsung_app/roster.dart';
 import 'package:jinsung_app/row_db.dart';
 import 'package:jinsung_app/store.dart';
 import 'package:jinsung_app/sync.dart';
@@ -32,5 +34,29 @@ void main() {
     expect(clash.conflicts, 1);
     expect((await phone.mustGet('input_line', line['id'] as String))['qty'], '4');
     expect(((await phone.db.openConflicts()).single['incoming'] as Map)['qty'], '5');
+  }, skip: server.isEmpty ? '서버 주소 없음 (JINSUNG_SERVER)' : false);
+
+  test('폰에서 「대표님께 보고 메일 보내기」 → 집 PC가 보고서 메일을 만들어 보내고 결과가 폰으로', () async {
+    final link = ServerLink(server);
+    final phone = Store(MemoryDb(), device: 'phone-mail');
+    await link.sync(phone);
+    final site = await phone.receive('12월 시험 현장', '공사', '2026-12-01');
+    final kim = await phone.saveRoster(kind: '인력', payee: '시험김씨', item: '보통인부', unit: '인', unitPrice: 200000);
+    final eq = await phone.saveRoster(kind: '장비', payee: '시험중기', item: '6W', unit: '일', unitPrice: 680000);
+    for (final d in ['2026-12-01', '2026-12-02', '2026-12-03']) {
+      await phone.addFromRoster(site, d, [(kim, '1'), (eq, '1')]);
+    }
+    final kimPayee = (await phone.roster()).firstWhere((r) => r.id == kim).row['payee_id'] as String;
+    await phone.setPayeeInfo(kimPayee, bank: '농협', account: '351-0000-0000-00');
+    final send = (await phone.monthPayouts('2026-12')).fold<int>(0, (a, o) => a + o.transfer);
+    final kimOut = (await phone.monthPayouts('2026-12')).firstWhere((o) => o.name == '시험김씨');
+    expect([kimOut.p.total, kimOut.incomeTax, kimOut.localTax, kimOut.transfer], [600000, 4050, 400, 595550]);
+    expect(send, greaterThan(600000)); // 데모 서버의 11월 미지급 이월 포함
+    await phone.markPayRequested('2026-12', status: '보낼 요청');
+    await link.sync(phone); // 올림 → 집 PC가 보냄
+    await link.sync(phone); // 결과 받아 옴
+    final r = (await phone.lastPayRequest('2026-12'))!;
+    expect(r.status, '전송됨', reason: r.result);
+    expect(r.result, contains('월말보고_2026-12.xlsx'));
   }, skip: server.isEmpty ? '서버 주소 없음 (JINSUNG_SERVER)' : false);
 }

@@ -129,20 +129,18 @@ void main() {
       expect(sitesTotal['요성리 용배수로']!.total, 93500 + 340000 + 637000);
       expect(sitesTotal['요성리 용배수로']!.materials, {'레미콘 25-21-08|㎥': 6.5});
 
-      // 6) 사장님께 결제 요청 올림 → 사장님 결제 끝남 → 지급 기록
-      String? copied;
-      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
-        return null;
-      });
+      // 6) 대표님께 보고 메일 보내기 (집 PC 주소가 없으면 요청만 남고, 맞추면 집 PC가 보낸다)
       await t.pump(const Duration(seconds: 3)); // 앞 알림이 사라질 때까지
       await t.drag(find.byType(Scrollable).first, const Offset(0, 5000)); // 맨 위로
       await t.pumpAndSettle();
-      await t.tap(find.byKey(const ValueKey('pay_request')));
+      await t.tap(find.byKey(const ValueKey('send_mail')));
       await t.pumpAndSettle();
-      expect((await store.lastPayRequest(month))!.amount, 1691000);
-      expect(copied, startsWith('[결제 요청] 진성건설'));
-      expect(copied, contains('대성중기  계좌 없음  680,000원'));
+      expect(find.textContaining('결제 요청 1,691,000원'), findsOneWidget);
+      await t.tap(find.widgetWithText(FilledButton, '보내기'));
+      await t.pumpAndSettle();
+      final req = (await store.lastPayRequest(month))!;
+      expect([req.amount, req.status], [1691000, '보낼 요청']);
+      expect(find.textContaining('보낼 준비'), findsOneWidget);
       await t.pump(const Duration(seconds: 3)); // 복사 알림이 사라질 때까지
       await t.ensureVisible(find.byKey(const ValueKey('all_paid')));
       await t.pumpAndSettle();

@@ -27,7 +27,8 @@ def precheck(store: Store, month: str, until: str | None = None) -> dict:
             continue
         cov = reports.log_coverage(store, s["id"], month, until)
         if cov["written"] or s["site_type"] == "정식":
-            sites.append({"site": s["name"], "written": cov["written"], "missing": cov["missing"]})
+            sites.append({"site": s["name"], "type": s["site_type"], "written": cov["written"],
+                          "missing": cov["missing"]})
     summary = reports.payment_summary(store, month)
     diff = store.db.execute(
         "SELECT COUNT(*) AS n FROM invoice WHERE work_date BETWEEN ? AND ? AND status IN"
@@ -57,7 +58,8 @@ def compose(store: Store, month: str) -> dict:
         f"2. 이달 투입 {check['total']:,}원 — 현장별: {per_site or '없음'}",
         f"3. 확인이 필요한 차이: {check['diffs']}건",
     ])
-    return {"subject": subject, "body": body, "corrected": check["corrected"]}
+    from . import report_mail
+    return {"subject": subject, "body": body, "html": report_mail.render(store, month), "corrected": check["corrected"]}
 
 
 def send_monthly(store: Store, month: str, out_dir, recipients: list[str], *, confirmed: bool,
@@ -74,9 +76,9 @@ def send_monthly(store: Store, month: str, out_dir, recipients: list[str], *, co
     outbox_id = new_id()
     with store.db:
         store.db.execute(
-            "INSERT INTO mail_outbox (id, subject, body, recipients, attachments, report_id, created_at)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (outbox_id, mail["subject"], mail["body"], json.dumps(recipients),
+            "INSERT INTO mail_outbox (id, subject, body, html, recipients, attachments, report_id, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (outbox_id, mail["subject"], mail["body"], mail.get("html"), json.dumps(recipients),
              json.dumps([str(path)]), report_id, store._now()))
     result = flush(store, transport) if transport else {"sent": 0, "failed": 0}
     return {"file": path, "outbox_id": outbox_id, **result}
@@ -87,7 +89,7 @@ def flush(store: Store, transport: Callable[[dict], None]) -> dict:
     sent = failed = 0
     for m in store.db.execute("SELECT * FROM mail_outbox WHERE status != '전송됨' ORDER BY created_at"
                               ).fetchall():
-        mail = {"subject": m["subject"], "body": m["body"],
+        mail = {"subject": m["subject"], "body": m["body"], "html": m["html"],
                 "recipients": json.loads(m["recipients"]), "attachments": json.loads(m["attachments"])}
         try:
             transport(mail)
@@ -124,6 +126,8 @@ def smtp_transport(host: str | None = None, port: int | None = None, user: str |
         msg = EmailMessage()
         msg["Subject"], msg["From"], msg["To"] = mail["subject"], user, ", ".join(mail["recipients"])
         msg.set_content(mail["body"])
+        if mail.get("html"):
+            msg.add_alternative(mail["html"], subtype="html")
         for a in mail["attachments"]:
             p = Path(a)
             msg.add_attachment(p.read_bytes(), maintype="application",
@@ -134,3 +138,49 @@ def smtp_transport(host: str | None = None, port: int | None = None, user: str |
             smtp.login(user, password)
             smtp.send_message(msg)
     return send
+
+
+def default_transport() -> Callable[[dict], None] | None:
+    """집 PC에 메일 설정(JINSUNG_SMTP_*)이 있으면 SMTP, 없으면 None(보낼 함에 남김)."""
+    if os.environ.get("JINSUNG_SMTP_HOST") and os.environ.get("JINSUNG_SMTP_PASSWORD"):
+        return smtp_transport()
+    if os.environ.get("JINSUNG_MAIL_DUMP"):
+        return dump_transport(os.environ["JINSUNG_MAIL_DUMP"])
+    return None
+
+
+def dump_transport(folder) -> Callable[[dict], None]:
+    """시험·미리보기용: 보낼 메일을 폴더에 html 로 남긴다(실제로 보내지 않음)."""
+    folder = Path(folder)
+
+    def send(mail: dict) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        name = mail["subject"].replace(" ", "_")
+        (folder / f"{name}.html").write_text(mail.get("html") or mail["body"], encoding="utf-8")
+        (folder / f"{name}.json").write_text(json.dumps(mail, ensure_ascii=False, indent=1), encoding="utf-8")
+    return send
+
+
+def send_requested(store: Store, request_id: str, out_dir, transport=None, recipients=None) -> dict:
+    """폰에서 「대표님께 보고 메일 보내기」를 누른 요청(pay_request)을 처리한다. 확인은 폰 확인 창에서 했다."""
+    from . import company
+    req = store.get("pay_request", request_id)
+    if req.get("status") != "보낼 요청":
+        return {"status": req.get("status")}
+    to = recipients if recipients is not None else company.ceo_recipients()
+    try:
+        if not to:
+            raise StoreError("대표님 메일 주소가 없습니다 (config/company.json 의 ceo_email).")
+        r = send_monthly(store, req["month"], out_dir, to, confirmed=True, transport=transport)
+        if transport is None:
+            status, result = "보낼 함 대기", "집 PC 메일 설정이 없어 보낼 함에 넣었습니다 (JINSUNG_SMTP_*)"
+        elif r["sent"]:
+            status, result = "전송됨", f"{', '.join(to)} · {Path(r['file']).name}"
+        else:
+            last = store.db.execute("SELECT last_error FROM mail_outbox WHERE id=?", (r["outbox_id"],)).fetchone()
+            status, result = "실패", f"보내지 못함: {last['last_error'] if last else ''} (보낼 함에 남음, 다시 시도)"
+    except StoreError as e:
+        status, result = "실패", str(e)
+    store.update("pay_request", request_id, req["version"], {
+        "status": status, "result": result, "sent_at": store._now() if status == "전송됨" else None})
+    return {"status": status, "result": result}

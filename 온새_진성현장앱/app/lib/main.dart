@@ -1124,6 +1124,19 @@ class _PayPageState extends State<PayPage> {
     }
   }
 
+  String _reqLine(PayRequest r, int sendSum) {
+    final d = r.date.substring(5);
+    if (sendSum == 0) return '$d 요청 ${wonText(r.amount)}원 → 결제 끝남';
+    final head = switch (r.status) {
+      '전송됨' => '$d 대표님께 보냄 · ${wonText(r.amount)}원 · 결제 기다림',
+      '보낼 요청' => '$d 보낼 준비 · 집 PC와 맞추면 보내집니다',
+      '보낼 함 대기' => '$d 집 PC 보낼 함에 있음 (PC 메일 설정 필요)',
+      '실패' => '$d 못 보냄: ${r.result}',
+      _ => '$d 카톡으로 요청 · ${wonText(r.amount)}원',
+    };
+    return r.amount == sendSum || r.status == '실패' ? head : '$head\n→ 지금 ${wonText(sendSum)}원 (바뀜, 다시 보내 주세요)';
+  }
+
   Future<void> _allPaid(int sum) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -1150,17 +1163,51 @@ class _PayPageState extends State<PayPage> {
     }
   }
 
-  Future<void> _request() async {
+  /// 대표님께 월말 보고 메일: 확인 창 → 요청 기록 → 집 PC와 맞추기(집 PC가 보고서를 만들어 보냄).
+  Future<void> _sendMail(int sendSum, List<Payout> payouts) async {
+    final noAcc = [for (final o in payouts) if (o.transfer > 0 && !o.hasAccount) o.name];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$month 월말 보고를 대표님께 보낼까요?'),
+        content: Text([
+          '결제 요청 ${wonText(sendSum)}원 · ${payouts.where((o) => o.transfer > 0).length}건',
+          '사람·업체별 계좌와 금액, 현장별 집계, 월말보고 Excel이 함께 갑니다.',
+          if (noAcc.isNotEmpty) '※ 계좌 없음: ${noAcc.join(', ')} (메일에 「계좌 확인 필요」로 표시)',
+          '보낸 달은 마감됩니다. 나중에 고치면 정정본으로 다시 보냅니다.',
+        ].join('\n\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아니요')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('보내기')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     try {
-      final text = await s.payoutText(month);
-      await s.markPayRequested(month); // 복사가 안 되는 폰이어도 요청 기록은 남는다
-      await Clipboard.setData(ClipboardData(text: text));
-      setState(() => refresh++);
-      await widget.onChanged();
-      if (mounted) showMessage(context, '결제 요청을 복사했습니다. 사장님 카톡에 붙여 넣으세요.');
+      await s.markPayRequested(month, status: '보낼 요청');
     } on StoreError catch (e) {
       if (mounted) showMessage(context, e.message);
+      return;
     }
+    var msg = '집 PC와 연결되면 바로 보내집니다.';
+    final base = (await s.db.setting('server_url') ?? '').trim();
+    if (base.isNotEmpty) {
+      try {
+        await ServerLink(base, token: await s.db.setting('server_token') ?? '').sync(s);
+        final r = await s.lastPayRequest(month);
+        msg = r?.status == '전송됨' ? '대표님께 보냈습니다.' : '집 PC: ${r?.status ?? ''} ${r?.result ?? ''}';
+      } catch (_) {
+        msg = '집 PC에 연결되지 않았습니다. 「동기화」에서 맞추면 그때 보내집니다.';
+      }
+    }
+    setState(() => refresh++);
+    await widget.onChanged();
+    if (mounted) showMessage(context, msg);
+  }
+
+  Future<void> _copyRequest() async {
+    await Clipboard.setData(ClipboardData(text: await s.payoutText(month)));
+    if (mounted) showMessage(context, '결제 요청 글을 복사했습니다.');
   }
 
   Future<void> _copy() async {
@@ -1200,7 +1247,7 @@ class _PayPageState extends State<PayPage> {
             SizedBox(width: 56, child: OutlinedButton(onPressed: () => setState(() => month = monthShift(month, 1)), child: const Text('▶'))),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '사장님께 올릴 결제 요청', children: [
+          Section(title: '대표님께 월말 보고 · 결제 요청', children: [
             bigNumber(context, '결제하실 돈', wonText(sendSum), '원', t),
             Text(
                 [
@@ -1212,28 +1259,25 @@ class _PayPageState extends State<PayPage> {
                 style: Theme.of(context).textTheme.bodySmall),
             Text('이달 투입 ${wonText(total)}원 · 일지 기준 남은 돈 ${wonText(due)}원', style: Theme.of(context).textTheme.bodySmall),
             if (req != null)
-              Text(
-                  sendSum == 0
-                      ? '${req.date.substring(5)} 요청 ${wonText(req.amount)}원 → 결제 끝남'
-                      : req.amount == sendSum
-                          ? '${req.date.substring(5)} 요청 올림 · ${wonText(req.amount)}원 · 사장님 결제 기다림'
-                          : '${req.date.substring(5)} 요청 올림 ${wonText(req.amount)}원 → 지금 ${wonText(sendSum)}원 (바뀜, 다시 올려 주세요)',
-                  style: TextStyle(color: sendSum == 0 || req.amount == sendSum ? t.sub : t.warn)),
+              Text(_reqLine(req, sendSum),
+                  style: TextStyle(color: req.status == '실패' || (sendSum > 0 && req.amount != sendSum) ? t.warn : t.sub)),
             if (noAccount > 0)
               Text('계좌 없는 사람은 아래에서 「계좌 넣기」로 먼저 넣어 주세요.', style: TextStyle(color: t.warn)),
             const SizedBox(height: 8),
             FilledButton(
-                key: const ValueKey('pay_request'),
-                onPressed: sendSum > 0 ? _request : null,
-                child: Text(req == null ? '결제 요청 복사 (사장님 카톡)' : '결제 요청 다시 복사')),
-            const SizedBox(height: 8),
-            Row2(children: [
-              Expanded(child: OutlinedButton(onPressed: _copy, child: const Text('한 달 집계 복사'))),
-              Expanded(
-                  child: OutlinedButton(
-                      key: const ValueKey('all_paid'),
-                      onPressed: req != null && sendSum > 0 ? () => _allPaid(sendSum) : null,
-                      child: const Text('결제 끝남'))),
+                key: const ValueKey('send_mail'),
+                onPressed: sendSum > 0 ? () => _sendMail(sendSum, payouts) : null,
+                child: Text(req != null && req.status == '전송됨' && req.amount != sendSum && sendSum > 0
+                    ? '정정 보고 다시 보내기'
+                    : '대표님께 보고 메일 보내기')),
+            const SizedBox(height: 4),
+            Wrap(alignment: WrapAlignment.end, children: [
+              TextButton(onPressed: sendSum > 0 ? _copyRequest : null, child: const Text('카톡용 복사')),
+              TextButton(onPressed: _copy, child: const Text('한 달 집계 복사')),
+              TextButton(
+                  key: const ValueKey('all_paid'),
+                  onPressed: req != null && sendSum > 0 ? () => _allPaid(sendSum) : null,
+                  child: const Text('결제 끝남')),
             ]),
           ]),
           if (payouts.isEmpty) ...[

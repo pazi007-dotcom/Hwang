@@ -160,6 +160,8 @@ class PayRequest {
   String get date => (row['requested_at'] as String).substring(0, 10);
   int get amount => row['amount'] as int;
   int get count => row['payee_count'] as int;
+  String get status => (row['status'] as String?) ?? '복사';
+  String get result => (row['result'] as String?) ?? '';
 }
 
 extension PayRequests on Store {
@@ -170,12 +172,12 @@ extension PayRequests on Store {
   }
 
   /// 결제 요청을 올렸다고 남긴다(금액·건수는 그때 값).
-  Future<String> markPayRequested(String month) async {
+  Future<String> markPayRequested(String month, {String status = '복사'}) async {
     final list = (await monthPayouts(month)).where((o) => o.transfer > 0).toList();
     if (list.isEmpty) throw StoreError('결제할 돈이 없습니다.');
     return insert('pay_request', {
       'month': month, 'amount': list.fold<int>(0, (a, o) => a + o.transfer), 'payee_count': list.length,
-      'requested_at': now(),
+      'requested_at': now(), 'status': status,
     });
   }
 
