@@ -15,7 +15,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Callable
 
-from . import excel_report, reports
+from . import excel_report, payout, reports
 from .store import Store, StoreError, new_id
 
 
@@ -43,9 +43,18 @@ def compose(store: Store, month: str) -> dict:
     check = precheck(store, month)
     per_site = " / ".join(f"{s['site']} {s['합계']:,}원" for s in reports.site_inputs(store, month))
     subject = f"월말보고 {month}" + (" 정정" if check["corrected"] else "")
+    pos = [o for o in payout.month_payouts(store, month) if o["transfer"] > 0]
+    groups = []
+    for g in ("작업자", "장비", "자재·외주"):
+        gl = [o for o in pos if o["group"] == g]
+        if gl:
+            groups.append(f"{g} {len(gl)}{'명' if g == '작업자' else '곳'} {sum(o['transfer'] for o in gl):,}원")
+    no_acc = [o["name"] for o in pos if not o["bank"]]
     body = "\n".join([
-        f"1. 이달 결제 합계: {check['total']:,}원 (받는 곳 {check['payees']}곳)",
-        f"2. 현장별 투입: {per_site or '없음'}",
+        f"1. 결제 요청: {sum(o['transfer'] for o in pos):,}원 ({' / '.join(groups) or '없음'})"
+        " — 사람·업체별 계좌·금액은 첨부 「이체목록」, 날짜별 근거는 「출역표」 시트"
+        + (f" ※ 계좌 확인 필요: {', '.join(no_acc)}" if no_acc else ""),
+        f"2. 이달 투입 {check['total']:,}원 — 현장별: {per_site or '없음'}",
         f"3. 확인이 필요한 차이: {check['diffs']}건",
     ])
     return {"subject": subject, "body": body, "corrected": check["corrected"]}

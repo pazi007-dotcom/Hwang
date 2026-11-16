@@ -417,3 +417,15 @@ CREATE TABLE IF NOT EXISTS roster (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+-- 결제 요청 (현장소장 → 사장님). 결제는 사장님이 한다. 앱은 올린 날·금액만 남긴다.
+CREATE TABLE IF NOT EXISTS pay_request (
+    id           TEXT PRIMARY KEY,
+    month        TEXT NOT NULL,
+    amount       INTEGER NOT NULL,
+    payee_count  INTEGER NOT NULL,
+    requested_at TEXT NOT NULL,
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);

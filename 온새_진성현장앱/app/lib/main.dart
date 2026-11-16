@@ -61,7 +61,7 @@ class _ShellState extends State<Shell> {
   List<Rec> sites = [];
   int version = 0; // 자료가 바뀌면 올려서 화면을 다시 그린다
 
-  static const titles = ['오늘 현장 보기', '오늘 일지 쓰기', '결제·한 달 집계', '작업자·장비 명부', '집 PC와 맞추기'];
+  static const titles = ['오늘 현장 보기', '오늘 일지 쓰기', '결제 요청·한 달 집계', '작업자·장비 명부', '집 PC와 맞추기'];
 
   @override
   void initState() {
@@ -191,7 +191,7 @@ class _ShellState extends State<Shell> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
           NavigationDestination(icon: Icon(Icons.edit_note_outlined), label: '일지'),
-          NavigationDestination(icon: Icon(Icons.payments_outlined), label: '결제'),
+          NavigationDestination(icon: Icon(Icons.payments_outlined), label: '결제 요청'),
           NavigationDestination(icon: Icon(Icons.badge_outlined), label: '명부'),
           NavigationDestination(icon: Icon(Icons.sync_outlined), label: '동기화'),
         ],
@@ -1076,6 +1076,7 @@ class _PayPageState extends State<PayPage> {
   Future<Map<String, dynamic>> _load() async => {
         'pay': await s.monthPayments(month),
         'payouts': await s.monthPayouts(month),
+        'req': await s.lastPayRequest(month),
         'sites': await s.monthSites(month),
         'locked': await s.isLocked(month),
         'year': await s.yearByPayee(month.substring(0, 4)),
@@ -1112,7 +1113,7 @@ class _PayPageState extends State<PayPage> {
   }
 
   Future<void> _pay(PayeeTotal p) async {
-    final a = await askText(context, '${p.name} 지급 기록', '지급한 금액 (원)', initial: '${p.balance}');
+    final a = await askText(context, '${p.name} 일부 지급 (사장님이 보낸 금액)', '보낸 금액 (원)', initial: '${p.balance}');
     if (a == null) return;
     try {
       await s.recordPayment(p.payeeId, month, a, workDateOf(DateTime.now()));
@@ -1123,27 +1124,23 @@ class _PayPageState extends State<PayPage> {
     }
   }
 
-  Future<void> _sent(Payout o) async {
+  Future<void> _allPaid(int sum) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${o.name}에게 ${wonText(o.transfer)}원 보냄'),
-        content: Text('${o.accountText}\n${o.breakdown}'),
+        title: const Text('사장님이 결제를 마치셨나요?'),
+        content: Text('남은 ${wonText(sum)}원을 전부 지급된 것으로 기록합니다.\n(뗀 세금·부가세도 함께 기록, 다음 달 이월 0)'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아니요')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('보냈음')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아직')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('결제 끝남')),
         ],
       ),
     );
     if (ok != true) return;
-    try {
-      await s.recordPayout(o, month, workDateOf(DateTime.now()));
-      setState(() => refresh++);
-      await widget.onChanged();
-      if (mounted) showMessage(context, '${o.name} ${wonText(o.transfer)}원 보낸 것으로 기록했습니다.');
-    } on StoreError catch (e) {
-      if (mounted) showMessage(context, e.message);
-    }
+    final n = await s.markAllPaid(month, workDateOf(DateTime.now()));
+    setState(() => refresh++);
+    await widget.onChanged();
+    if (mounted) showMessage(context, '$n건을 지급 완료로 기록했습니다.');
   }
 
   Future<void> _account(Payout o) async {
@@ -1153,9 +1150,17 @@ class _PayPageState extends State<PayPage> {
     }
   }
 
-  Future<void> _copyPayout() async {
-    await Clipboard.setData(ClipboardData(text: await s.payoutText(month)));
-    if (mounted) showMessage(context, '이체 목록을 복사했습니다.');
+  Future<void> _request() async {
+    try {
+      final text = await s.payoutText(month);
+      await s.markPayRequested(month); // 복사가 안 되는 폰이어도 요청 기록은 남는다
+      await Clipboard.setData(ClipboardData(text: text));
+      setState(() => refresh++);
+      await widget.onChanged();
+      if (mounted) showMessage(context, '결제 요청을 복사했습니다. 사장님 카톡에 붙여 넣으세요.');
+    } on StoreError catch (e) {
+      if (mounted) showMessage(context, e.message);
+    }
   }
 
   Future<void> _copy() async {
@@ -1187,6 +1192,7 @@ class _PayPageState extends State<PayPage> {
         }
         final sendSum = payouts.fold<int>(0, (a, o) => a + (o.transfer > 0 ? o.transfer : 0));
         final noAccount = payouts.where((o) => o.transfer > 0 && !o.hasAccount).length;
+        final req = snap.data!['req'] as PayRequest?;
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
           Row2(children: [
             SizedBox(width: 56, child: OutlinedButton(onPressed: () => setState(() => month = monthShift(month, -1)), child: const Text('◀'))),
@@ -1194,8 +1200,8 @@ class _PayPageState extends State<PayPage> {
             SizedBox(width: 56, child: OutlinedButton(onPressed: () => setState(() => month = monthShift(month, 1)), child: const Text('▶'))),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '이달 보낼 돈 (사람·업체별 이체)', children: [
-            bigNumber(context, '보낼 돈 합계', wonText(sendSum), '원', t),
+          Section(title: '사장님께 올릴 결제 요청', children: [
+            bigNumber(context, '결제하실 돈', wonText(sendSum), '원', t),
             Text(
                 [
                   for (final g in groups.keys)
@@ -1205,10 +1211,29 @@ class _PayPageState extends State<PayPage> {
                 ].join(' · '),
                 style: Theme.of(context).textTheme.bodySmall),
             Text('이달 투입 ${wonText(total)}원 · 일지 기준 남은 돈 ${wonText(due)}원', style: Theme.of(context).textTheme.bodySmall),
+            if (req != null)
+              Text(
+                  sendSum == 0
+                      ? '${req.date.substring(5)} 요청 ${wonText(req.amount)}원 → 결제 끝남'
+                      : req.amount == sendSum
+                          ? '${req.date.substring(5)} 요청 올림 · ${wonText(req.amount)}원 · 사장님 결제 기다림'
+                          : '${req.date.substring(5)} 요청 올림 ${wonText(req.amount)}원 → 지금 ${wonText(sendSum)}원 (바뀜, 다시 올려 주세요)',
+                  style: TextStyle(color: sendSum == 0 || req.amount == sendSum ? t.sub : t.warn)),
+            if (noAccount > 0)
+              Text('계좌 없는 사람은 아래에서 「계좌 넣기」로 먼저 넣어 주세요.', style: TextStyle(color: t.warn)),
+            const SizedBox(height: 8),
+            FilledButton(
+                key: const ValueKey('pay_request'),
+                onPressed: sendSum > 0 ? _request : null,
+                child: Text(req == null ? '결제 요청 복사 (사장님 카톡)' : '결제 요청 다시 복사')),
             const SizedBox(height: 8),
             Row2(children: [
-              Expanded(child: FilledButton(onPressed: _copyPayout, child: const Text('이체 목록 복사'))),
-              Expanded(child: OutlinedButton(onPressed: _copy, child: const Text('결제 요약 복사'))),
+              Expanded(child: OutlinedButton(onPressed: _copy, child: const Text('한 달 집계 복사'))),
+              Expanded(
+                  child: OutlinedButton(
+                      key: const ValueKey('all_paid'),
+                      onPressed: req != null && sendSum > 0 ? () => _allPaid(sendSum) : null,
+                      child: const Text('결제 끝남'))),
             ]),
           ]),
           if (payouts.isEmpty) ...[
@@ -1241,8 +1266,7 @@ class _PayPageState extends State<PayPage> {
                 ),
                 Row(mainAxisAlignment: MainAxisAlignment.end, children: [
                   TextButton(onPressed: () => _account(o), child: Text(o.hasAccount ? '계좌·방식' : '계좌 넣기')),
-                  if (o.transfer > 0) TextButton(key: ValueKey('sent_${o.name}'), onPressed: () => _sent(o), child: const Text('보냈음')),
-                  TextButton(onPressed: () => _pay(o.p), child: const Text('일부만')),
+                  if (o.transfer > 0) TextButton(onPressed: () => _pay(o.p), child: const Text('일부만 지급됨')),
                 ]),
                 const Divider(height: 1),
               ],

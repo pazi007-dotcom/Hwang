@@ -100,7 +100,7 @@ let n = 0; const notes = [];
     await scroll(1200); await shot('요성리 고친 뒤');
 
     // ── 5. 결제 탭
-    await tap('tab', '결제'); await p.waitForTimeout(1000); await shot('결제 탭');
+    await tap('tab', '결제 요청'); await p.waitForTimeout(1000); await shot('결제 탭');
     await scroll(700); await shot('결제 탭 아래');
     await scroll(900); await shot('현장별 한 달 집계');
     // ── 6. 홈

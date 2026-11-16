@@ -51,7 +51,7 @@ class Payout {
         if (localTax > 0) '지방세 −${wonFmt(localTax)}',
         if (vat > 0) '부가세 +${wonFmt(vat)}',
         if (p.carry != 0) '이월 ${wonFmt(p.carry)}',
-        if (p.paid != 0) '보냄 −${wonFmt(p.paid)}',
+        if (p.paid != 0) '지급됨 −${wonFmt(p.paid)}',
       ].join(' · ');
 }
 
@@ -126,9 +126,11 @@ extension Payouts on Store {
   /// 은행 이체·카톡용 목록.
   Future<String> payoutText(String month) async {
     final list = (await monthPayouts(month)).where((o) => o.transfer > 0).toList();
-    final b = StringBuffer('[진성건설] ${month.substring(0, 4)}년 ${int.parse(month.substring(5))}월 이체 목록\n');
+    final b = StringBuffer('[결제 요청] 진성건설 ${month.substring(0, 4)}년 ${int.parse(month.substring(5))}월 · 현장소장 → 사장님\n');
     final sum = list.fold<int>(0, (a, o) => a + o.transfer);
-    b.writeln('${list.length}건 · 보낼 돈 ${wonFmt(sum)}원');
+    b.writeln('${list.length}건 · 결제하실 돈 ${wonFmt(sum)}원');
+    final noAcc = list.where((o) => !o.hasAccount).map((o) => o.name).toList();
+    if (noAcc.isNotEmpty) b.writeln('※ 계좌 확인 필요: ${noAcc.join(', ')}');
     for (final g in ['작업자', '장비', '자재·외주']) {
       final gl = list.where((o) => o.group == g).toList();
       if (gl.isEmpty) continue;
@@ -145,6 +147,46 @@ extension Payouts on Store {
       b.writeln('뗀 세금 ${wonFmt(tax)}원 (소득세 ${wonFmt(list.fold<int>(0, (a, o) => a + o.incomeTax))} · '
           '지방소득세 ${wonFmt(list.fold<int>(0, (a, o) => a + o.localTax))}) → 다음 달 10일까지 신고·납부');
     }
+    b.writeln();
+    b.writeln('근거: 사람별 출역표·일지 (월말보고 Excel 「이체목록」「출역표」 시트)');
     return b.toString().trimRight();
+  }
+}
+
+/// 결제 요청(현장소장 → 사장님). 결제는 사장님이 하고, 앱은 올린 날·금액만 남긴다.
+class PayRequest {
+  PayRequest(this.row);
+  final Rec row;
+  String get date => (row['requested_at'] as String).substring(0, 10);
+  int get amount => row['amount'] as int;
+  int get count => row['payee_count'] as int;
+}
+
+extension PayRequests on Store {
+  Future<PayRequest?> lastPayRequest(String month) async {
+    final rows = (await db.all('pay_request')).where((r) => r['month'] == month).toList()
+      ..sort((a, b) => (a['requested_at'] as String).compareTo(b['requested_at'] as String));
+    return rows.isEmpty ? null : PayRequest(rows.last);
+  }
+
+  /// 결제 요청을 올렸다고 남긴다(금액·건수는 그때 값).
+  Future<String> markPayRequested(String month) async {
+    final list = (await monthPayouts(month)).where((o) => o.transfer > 0).toList();
+    if (list.isEmpty) throw StoreError('결제할 돈이 없습니다.');
+    return insert('pay_request', {
+      'month': month, 'amount': list.fold<int>(0, (a, o) => a + o.transfer), 'payee_count': list.length,
+      'requested_at': now(),
+    });
+  }
+
+  /// 사장님이 결제를 마쳤다고 알려 오면: 남은 건 전부 지급으로 기록(세금·부가세 포함). 몇 건 기록했는지 돌려줌.
+  Future<int> markAllPaid(String month, String paidDate) async {
+    var n = 0;
+    for (final o in await monthPayouts(month)) {
+      if (o.transfer <= 0) continue;
+      await recordPayout(o, month, paidDate);
+      n++;
+    }
+    return n;
   }
 }

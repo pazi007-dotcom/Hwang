@@ -1,8 +1,10 @@
 // 사람이 누르는 순서 그대로 화면을 조작하는 시험 (기준 정보가 하나도 없는 새 폰에서 시작).
 // 화면이 넘치면(RenderFlex overflow) 시험이 실패한다 → 화면 잘림 검사를 겸한다.
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jinsung_app/ledger.dart';
 import 'package:jinsung_app/main.dart';
+import 'package:jinsung_app/payout.dart';
 import 'package:jinsung_app/row_db.dart';
 import 'package:jinsung_app/store.dart';
 import 'package:material_ui/material_ui.dart';
@@ -110,7 +112,7 @@ void main() {
       expect((await store.db.all('input_line')).any((l) => l['qty'] == '6.5' && l['amount'] == 637000), isTrue);
 
       // 5) 결제 탭: 누구에게 얼마
-      await t.tap(find.text('결제'));
+      await t.tap(find.text('결제 요청'));
       await t.pumpAndSettle();
       final month = workDateOf(DateTime.now()).substring(0, 7);
       final pay = {for (final p in await store.monthPayments(month)) p.name: p};
@@ -127,19 +129,31 @@ void main() {
       expect(sitesTotal['요성리 용배수로']!.total, 93500 + 340000 + 637000);
       expect(sitesTotal['요성리 용배수로']!.materials, {'레미콘 25-21-08|㎥': 6.5});
 
-      // 6) 지급 기록 → 잔액
-      final sent = find.byKey(const ValueKey('sent_대성중기'));
-      await scrollTo(t, sent);
-      await t.tap(sent);
+      // 6) 사장님께 결제 요청 올림 → 사장님 결제 끝남 → 지급 기록
+      String? copied;
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
+        return null;
+      });
+      await t.pump(const Duration(seconds: 3)); // 앞 알림이 사라질 때까지
+      await t.drag(find.byType(Scrollable).first, const Offset(0, 5000)); // 맨 위로
       await t.pumpAndSettle();
-      await t.tap(find.widgetWithText(FilledButton, '보냈음'));
+      await t.tap(find.byKey(const ValueKey('pay_request')));
+      await t.pumpAndSettle();
+      expect((await store.lastPayRequest(month))!.amount, 1691000);
+      expect(copied, startsWith('[결제 요청] 진성건설'));
+      expect(copied, contains('대성중기  계좌 없음  680,000원'));
+      await t.pump(const Duration(seconds: 3)); // 복사 알림이 사라질 때까지
+      await t.ensureVisible(find.byKey(const ValueKey('all_paid')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('all_paid')));
+      await t.pumpAndSettle();
+      await t.tap(find.widgetWithText(FilledButton, '결제 끝남'));
       await t.pumpAndSettle();
       final after = {for (final p in await store.monthPayments(month)) p.name: p};
-      expect(after['대성중기']!.paid, 680000); // 줄 돈이 가장 큰 곳(맨 위)을 전액 지급
-      expect(after['대성중기']!.balance, 0);
-      expect(after['가은레미콘']!.balance, 637000);
-      expect((await store.monthPayments(month)).last.name, '대성중기'); // 다 준 곳은 아래로
-      expect((await store.paymentText(month)).contains('■ 가은레미콘  637,000원'), isTrue);
+      expect(after['대성중기']!.paid, 680000);
+      expect([for (final p in after.values) p.balance].every((b) => b == 0), isTrue); // 전부 지급 완료
+      expect((await store.monthPayouts(month)).every((o) => o.transfer == 0), isTrue);
     });
   }
 }

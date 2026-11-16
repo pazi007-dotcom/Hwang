@@ -60,7 +60,7 @@ const OUT = process.argv[2]; let n = 0; const notes = [];
     await scroll(800); await shot('김반장 출역표 아래 (날짜별·연간)');
     await p.keyboard.press('Escape'); await p.waitForTimeout(500);
     await p.goBack().catch(() => {}); await p.waitForTimeout(800);
-    await tap('tab', '결제'); await p.waitForTimeout(800); await scroll(3000); await shot('결제 탭 아래 (년 누계)');
+    await tap('tab', '결제 요청'); await p.waitForTimeout(800); await scroll(3000); await shot('결제 탭 아래 (년 누계)');
     await scroll(-600); await shot('결제 탭 년 누계 위');
   } catch (e) { notes.push('!! 막힘: ' + e.message); await shot('막힌 화면'); }
   notes.push('페이지 오류: ' + JSON.stringify(errs)); console.log(notes.join('\n')); await b.close();

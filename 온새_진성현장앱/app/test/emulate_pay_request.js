@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const OUT = process.argv[2]; let n = 0; const notes = [];
 (async () => {
   const b = await chromium.launch();
-  const ctx = await b.newContext({ viewport: { width: 360, height: 800 }, timezoneId: 'Asia/Seoul', locale: 'ko-KR' });
+  const ctx = await b.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 360, height: 800 }, timezoneId: 'Asia/Seoul', locale: 'ko-KR' });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(String(e)));
   await p.addInitScript(() => { const f = new Date('2026-11-16T08:30:00+09:00').getTime(); const D = Date;
     globalThis.Date = class extends D { constructor(...a) { super(...(a.length ? a : [f])); } static now() { return f; } }; });
@@ -36,22 +36,16 @@ const OUT = process.argv[2]; let n = 0; const notes = [];
     await tap('button', '오늘 나온 사람·장비 고르기'); await p.waitForTimeout(700);
     for (const name of ['김반장 · 보통인부', '이영수 · 보통인부', '박목수 · 형틀목공', '대성중기 · 6W']) { await clickText(name, false); await p.waitForTimeout(250); }
     await tap('button', '고른 것 넣기'); await p.waitForTimeout(900);
-    await tap('tab', '결제'); await p.waitForTimeout(1000); await shot('결제 탭 위 (보낼 돈)');
-    await scroll(450); await shot('작업자 사람별 이체');
-    await scroll(450); await shot('장비 이체');
-    // 대성중기 부가세 별도로
-    await tap('button', '계좌·방식'); await p.waitForTimeout(400);
-    const btns = await p.getByRole('button', { name: '계좌·방식' }).count(); notes.push('   계좌·방식 단추 ' + btns);
-    await p.keyboard.press('Escape'); await p.waitForTimeout(500);
-    await (await find('button', '계좌·방식')).click().catch(()=>{});
-    await p.getByRole('button', { name: '계좌·방식' }).last().click(); await p.waitForTimeout(600);
-    await shot('계좌·방식 창');
-    await clickText('부가세 10% 더해서'); await tap('button', '저장', true); await p.waitForTimeout(900);
-    await shot('대성중기 부가세 더한 뒤');
-    await p.getByRole('button', { name: '보냈음' }).first().click(); await p.waitForTimeout(600);
-    await shot('보냈음 확인창');
-    await p.getByRole('button', { name: '보냈음' }).last().click(); await p.waitForTimeout(900);
-    await scroll(-3000); await shot('보낸 뒤 위');
+    await tap('tab', '결제 요청'); await p.waitForTimeout(1000); await shot('결제 탭 위 (보낼 돈)');
+    await scroll(450); await shot('작업자 사람별');
+    await scroll(-3000);
+    await tap('button', '결제 요청 복사 (사장님 카톡)'); await p.waitForTimeout(900);
+    const clip = await p.evaluate(() => navigator.clipboard.readText()).catch(e => 'ERR ' + e);
+    notes.push('---- 복사된 결제 요청 ----\n' + clip);
+    await shot('요청 올린 뒤');
+    await p.waitForTimeout(2600);
+    await tap('button', '결제 끝남');  await p.waitForTimeout(600); await shot('결제 끝남 확인창');
+    await p.getByRole('button', { name: '결제 끝남', exact: true }).last().click(); await p.waitForTimeout(900); await shot('지급 기록 뒤');
   } catch (e) { notes.push('!! 막힘: ' + e.message); await shot('막힌 화면'); }
   notes.push('페이지 오류: ' + JSON.stringify(errs)); console.log(notes.join('\n')); await b.close();
 })();
