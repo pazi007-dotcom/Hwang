@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS site (
     gps_radius_m    REAL,
     sta_interval    TEXT NOT NULL DEFAULT '20',  -- 측점 간격(m)
     sta_label_shift INTEGER NOT NULL DEFAULT 0,  -- 도면 표기 치환 (예: 도면 'No 6' = 실제 No.0 → -6)
+    -- 공사 건의 흐름: 접수 → (보류) → 진행 → 완공. 취소는 '취소'로 남기거나(비용이 있을 때) 파기한다.
+    status          TEXT NOT NULL DEFAULT '진행' CHECK (status IN ('접수','보류','진행','완공','취소')),
+    job_type        TEXT,                        -- 접수 구분: 긴급 / 견적 / 수의 / 입찰 / 민원 / 기타
+    received_date   TEXT,                        -- 접수일
+    planned_start   TEXT,                        -- 시작 예정일 (발주·체크 알림의 기준)
+    instructions    TEXT,                        -- 지시사항
+    status_reason   TEXT,                        -- 보류·취소 사유
     version         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
@@ -339,3 +346,50 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
     seq      INTEGER NOT NULL,
     PRIMARY KEY (peer, dir)
 );
+
+-- 공사 건의 연락처 (발주처 담당, 감독, 마을 이장, 민원인 …)
+CREATE TABLE IF NOT EXISTS contact (
+    id          TEXT PRIMARY KEY,
+    site_id     TEXT NOT NULL REFERENCES site(id),
+    name        TEXT NOT NULL,
+    role        TEXT,
+    phone       TEXT,
+    note        TEXT,
+    version     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- 첨부 자료 (도면·내역·사진·문서). 원본 파일은 건드리지 않고 경로만 둔다.
+CREATE TABLE IF NOT EXISTS attachment (
+    id          TEXT PRIMARY KEY,
+    site_id     TEXT NOT NULL REFERENCES site(id),
+    kind        TEXT NOT NULL CHECK (kind IN ('도면','내역','사진','문서','기타')),
+    path        TEXT NOT NULL,
+    note        TEXT,
+    review      TEXT NOT NULL DEFAULT '검토 대기' CHECK (review IN ('검토 대기','온새 승인','확인 필요','해당 없음')),
+    review_note TEXT,
+    version     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- 할 일·체크 (필수 확인사항, 인력·장비·자재 발주, 서류, 민원). 기한이 오면 홈 화면이 알린다.
+CREATE TABLE IF NOT EXISTS site_task (
+    id           TEXT PRIMARY KEY,
+    site_id      TEXT NOT NULL REFERENCES site(id),
+    kind         TEXT NOT NULL CHECK (kind IN ('확인','인력','장비','자재','서류','측량','민원','기타')),
+    title        TEXT NOT NULL,
+    due_date     TEXT,
+    qty          TEXT,
+    unit         TEXT,
+    work_type_id TEXT REFERENCES work_type(id),
+    source       TEXT NOT NULL DEFAULT '직접' CHECK (source IN ('직접','온새 제안')),
+    done         INTEGER NOT NULL DEFAULT 0,
+    done_date    TEXT,
+    note         TEXT,
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_task_due ON site_task(done, due_date);

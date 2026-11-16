@@ -23,7 +23,7 @@ KINDS = ("인력", "장비", "자재", "외주")
 # 동기화하는 테이블 (기기끼리 주고받는 기록). 이력·충돌·보낼 함은 기기별로 둔다.
 SYNCED = ("site", "payee", "rate", "work_type", "station", "work_log", "input_line",
           "progress", "allocation", "invoice", "photo", "level_run", "level_reading",
-          "payment", "market_price", "approval", "report_log")
+          "payment", "market_price", "approval", "report_log", "contact", "attachment", "site_task")
 
 
 class StoreError(Exception):
@@ -170,7 +170,9 @@ class Store:
         마감된 달에 기록을 더하려면 사유가 있어야 한다."""
         if not site_id:
             raise StoreError("현장을 골라 주세요. 어디에도 속하지 않으면 '본사·공통'을 고릅니다.")
-        self.get("site", site_id)
+        site = self.get("site", site_id)
+        if site["status"] == "취소":
+            raise StoreError(f"'{site['name']}'은(는) 취소된 건입니다. 일지를 쓸 수 없습니다.")
         wd = parse_work_date(work_date)
         self._check_unlocked(wd, reason=reason, creating=True)
         row = self.db.execute("SELECT id FROM work_log WHERE site_id=? AND work_date=?",

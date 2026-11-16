@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import alerts, excel_report, mailer, reports, stations, sync, voice_log
+from . import alerts, excel_report, intake, mailer, reports, schedule, stations, sync, voice_log
 from .store import Store, StoreError
 from .templates import IMPLEMENTED
 
@@ -48,7 +48,52 @@ class App:
     # ---- 읽기 ----
     def sites(self, **_):
         return [dict(r) for r in self.store.db.execute(
-            "SELECT id, name, site_type, client, contract_amount FROM site ORDER BY created_at")]
+            "SELECT id, name, site_type, client, contract_amount, status, job_type FROM site"
+            " WHERE status != '취소' ORDER BY (status='진행') DESC, created_at")]
+
+    # ---- 접수함 ----
+    def board(self, **_):
+        return intake.board(self.store)
+
+    def job(self, site, **_):
+        s = self.store
+        q = lambda sql: [dict(r) for r in s.db.execute(sql, (site,))]   # noqa: E731
+        return {"site": s.get("site", site),
+                "contacts": q("SELECT * FROM contact WHERE site_id=? ORDER BY created_at"),
+                "attachments": q("SELECT * FROM attachment WHERE site_id=? ORDER BY created_at"),
+                "tasks": q("SELECT * FROM site_task WHERE site_id=? ORDER BY done, due_date, created_at")}
+
+    def receive(self, name, job_type, received_date, client=None, instructions=None,
+                contact_name=None, contact_phone=None, contact_role=None, **_):
+        contacts = [{"name": contact_name, "phone": contact_phone, "role": contact_role}] if contact_name else []
+        return {"site": intake.receive(self.store, name, job_type, received_date, client=client or None,
+                                       instructions=instructions or None, contacts=contacts)}
+
+    def job_status(self, site, action, reason=None, date=None, **_):
+        s = self.store
+        if action == "보류":
+            intake.hold(s, site, reason or "")
+            return {"status": "보류"}
+        if action == "취소":
+            return {"status": intake.cancel(s, site, reason or "")}
+        if action == "진행":
+            return {"status": "진행", "tasks": len(intake.proceed(s, site, date or None))}
+        if action == "완공":
+            return {"status": "완공", "left": intake.complete(s, site, date)}
+        raise ValueError("action 은 보류·취소·진행·완공 중 하나입니다.")
+
+    def task_check(self, task, date, done=True, **_):
+        intake.check(self.store, task, date, bool(done))
+        return {"ok": True}
+
+    def task_add(self, site, kind, title, due_date=None, **_):
+        return {"task": intake.add_task(self.store, site, kind, title, due_date=due_date or None)}
+
+    def complaint(self, site, date, title, **_):
+        return {"task": intake.complaint(self.store, site, date, title)}
+
+    def day(self, date, **_):
+        return schedule.day_overview(self.store, date)
 
     def payees(self, **_):
         return [dict(r) for r in self.store.db.execute("SELECT id, name, payee_type FROM payee ORDER BY name")]
@@ -110,9 +155,12 @@ class App:
 
 GET = {"/api/sites": "sites", "/api/payees": "payees", "/api/home": "home",
        "/api/quantities": "quantities", "/api/work_types": "work_types",
-       "/api/precheck": "precheck", "/api/sync/pull": "sync_pull"}
+       "/api/precheck": "precheck", "/api/sync/pull": "sync_pull",
+       "/api/board": "board", "/api/job": "job", "/api/day": "day"}
 POST = {"/api/voice/parse": "voice_parse", "/api/voice/commit": "voice_commit",
-        "/api/no_work": "no_work", "/api/sync/push": "sync_push"}
+        "/api/no_work": "no_work", "/api/sync/push": "sync_push", "/api/receive": "receive",
+        "/api/job/status": "job_status", "/api/task/check": "task_check", "/api/task/add": "task_add",
+        "/api/complaint": "complaint"}
 
 
 def make_handler(app: App, token: str | None):
@@ -193,6 +241,12 @@ def demo_store() -> Store:
         s.add_input(y["site"], day, "자재", "레미콘", "5.5", rmc, spec="25-21-08",
                     work_type_id=y["base"], sta_from=str(a), sta_to=str(b))
         s.add_progress(y["site"], day, y["base"], b - a, "m", sta_from=str(a), sta_to=str(b))
+    intake.proceed(s, y["site"], "2026-11-10")
+    intake.receive(s, "점촌 배수로 긴급복구(예시)", "긴급", "2026-11-13", client="문경시",
+                   instructions="토사 유입 구간 약 30m 준설",
+                   contacts=[{"name": "담당 주무관(예시)", "role": "감독", "phone": "054-000-0000"}])
+    held = intake.receive(s, "모전 농로 포장 견적(예시)", "견적", "2026-11-11")
+    intake.hold(s, held, "발주처 예산 미확정")
     s.add_invoice(dump, "2026-11-12", "장비", "6W", 1, 700_000)
     reports.match_invoices(s, "2026-11")
     return s

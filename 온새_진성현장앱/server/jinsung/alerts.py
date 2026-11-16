@@ -155,11 +155,15 @@ def rate_alerts(store: Store) -> list[dict]:
 
 def home(store: Store, site_id: str, today: str) -> dict:
     """홈 화면 카드: 오늘 할 일(많아야 3줄) + 경보 전체."""
+    from . import schedule
     todo = []
+    site = store.get("site", site_id)
     has_log = store.db.execute("SELECT 1 FROM work_log WHERE site_id=? AND work_date=?",
                                (site_id, today)).fetchone()
-    if not has_log:
+    if not has_log and site["status"] == "진행":
         todo.append("오늘 일지 미작성")
+    tasks = schedule.due(store, today, site_id=site_id)
+    todo += [t["text"] for t in tasks[:2]]
     n_conf = len(store.open_conflicts())
     if n_conf:
         todo.append(f"충돌 검토 {n_conf}건")
@@ -170,4 +174,4 @@ def home(store: Store, site_id: str, today: str) -> dict:
     alerts = (allocation_alerts(store, site_id) + cost_alerts(store, site_id)
               + design_change_candidates(store, site_id) + rate_alerts(store))
     alerts.sort(key=lambda a: a["level"] != "빨강")
-    return {"todo": todo[:3], "alerts": alerts}
+    return {"todo": todo[:3], "alerts": alerts, "tasks": tasks}

@@ -37,6 +37,7 @@ main { max-width: 960px; margin: 0 auto; padding: 0 var(--pad); display: grid; g
 .alert:first-of-type { border-top: 0; }
 .bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--blue); }
+input[type=checkbox] { padding: 0; }
 table { width: 100%; border-collapse: collapse; font-size: var(--f-note); }
 th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -68,18 +69,20 @@ section { display: none; gap: var(--gap); } section.on { display: grid; }
 </header>
 <main>
   <section id="home" class="on"></section>
+  <section id="job"></section>
   <section id="log"></section>
   <section id="qty"></section>
   <section id="report"></section>
 </main>
 <nav>
   <button data-tab="home" class="on">홈</button>
+  <button data-tab="job">접수</button>
   <button data-tab="log">일지</button>
   <button data-tab="qty">물량</button>
   <button data-tab="report">보고</button>
 </nav>
 <script>
-const TITLES = {home: "오늘 현장 보기", log: "오늘 일지 쓰기", qty: "물량 확인하기", report: "월말 보고 보내기"};
+const TITLES = {job: "공사 건 접수하기", home: "오늘 현장 보기", log: "오늘 일지 쓰기", qty: "물량 확인하기", report: "월말 보고 보내기"};
 const $ = (id) => document.getElementById(id);
 const won = (n) => Number(n).toLocaleString("ko-KR");
 const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);   // 한국 날짜
@@ -119,6 +122,12 @@ async function showHome() {
     h("div", {class: "card"}, h("h2", {}, "오늘 할 일"),
       d.todo.length ? d.todo.map(t => h("div", {class: "alert"}, h("span", {class: "badge 주황"}, "할 일"), t))
                     : h("div", {class: "note"}, "오늘 할 일이 없습니다.")),
+    h("div", {class: "card"}, h("h2", {}, "발주·체크 (기한순)"),
+      d.tasks.length ? d.tasks.slice(0, 8).map(t => { const box = h("input", {type: "checkbox", style: "width:28px;min-height:28px;flex:none"});
+        box.onchange = async () => { await api("/api/task/check", {task: t.id, date: today()}); go("home"); };
+        return h("label", {class: "alert", style: "color:var(--text);font-size:var(--f-body);margin:0"}, box,
+          h("span", {class: "badge " + t.level}, t.when), h("span", {}, t.title + (t.qty ? ` ${t.qty}${t.unit}` : ""))); })
+        : h("div", {class: "note"}, "이틀 안에 챙길 일이 없습니다.")),
     h("div", {class: "card"}, h("h2", {}, "공정 막대 (측점 기준)"), bars.length ? bars : h("div", {class: "note"}, "공종이 없습니다.")),
     h("div", {class: "card"}, h("h2", {}, "확인이 필요한 것"),
       d.alerts.length ? d.alerts.map(a => h("div", {class: "alert"},
@@ -127,6 +136,49 @@ async function showHome() {
       h("tr", {}, h("th", {}, "작업일"), h("th", {}, "내용"), h("th", {class: "r"}, "투입"), h("th", {class: "r"}, "금액(원)")),
       d.logs.map(l => h("tr", {}, h("td", {}, l.work_date), h("td", {}, l.no_work ? "작업 없음" : (l.content || "")),
         h("td", {class: "r"}, l.lines + "줄"), h("td", {class: "r"}, won(l.amount))))))));
+}
+
+async function showJob() {
+  const b = await api("/api/board");
+  const f = {name: h("input", {placeholder: "예: 점촌 배수로 긴급복구"}),
+    type: h("select", {}, ["긴급", "견적", "수의", "입찰", "민원", "기타"].map(x => h("option", {}, x))),
+    date: h("input", {type: "date", value: today()}), client: h("input", {placeholder: "발주처 (나중에 채워도 됨)"}),
+    inst: h("textarea", {placeholder: "지시사항·필수 확인사항"}),
+    cname: h("input", {placeholder: "연락처 이름"}), cphone: h("input", {placeholder: "전화번호", inputmode: "tel"})};
+  const msg = h("div", {});
+  const save = async () => {
+    try {
+      await api("/api/receive", {name: f.name.value, job_type: f.type.value, received_date: f.date.value,
+        client: f.client.value, instructions: f.inst.value, contact_name: f.cname.value, contact_phone: f.cphone.value});
+      await reloadSites(); go("job");
+    } catch (e) { put(msg, h("div", {class: "msg 빨강"}, e.message)); }
+  };
+  const act = async (id, action, ask) => {
+    let reason = null, date = null;
+    if (ask === "reason") { reason = prompt(action + " 사유"); if (!reason) return; }
+    if (ask === "date") { date = prompt(action === "진행" ? "시작 예정일 (YYYY-MM-DD, 비우면 일정 없이 진행)" : "완공일 (YYYY-MM-DD)", today()); if (date === null) return; }
+    try { const r = await api("/api/job/status", {site: id, action, reason, date});
+      if (r.status === "파기") alert("투입이 없어 파기했습니다."); if (r.status === "보관") alert("투입 기록이 있어 '취소'로 보관했습니다.");
+      await reloadSites(); go("job");
+    } catch (e) { alert(e.message); }
+  };
+  const btn = (label, fn) => { const x = h("button", {class: "ghost", style: "min-height:44px"}, label); x.onclick = fn; return x; };
+  const group = (title, list, buttons) => h("div", {class: "card"}, h("h2", {}, `${title} ${list.length}건`),
+    list.length ? list.map(j => h("div", {class: "alert", style: "flex-wrap:wrap"},
+      h("span", {class: "badge 주황"}, j.job_type || "공사"), h("b", {style: "flex:1 1 200px"}, j.name),
+      h("div", {class: "note", style: "flex:1 1 100%"}, `접수 ${j.received_date || "-"}` + (j.planned_start ? ` · 시작 예정 ${j.planned_start}` : "")
+        + ` · 남은 체크 ${j.open_tasks}` + (j.review_waiting ? ` · 검토 대기 ${j.review_waiting}` : "") + (j.reason ? ` · ${j.reason}` : "")),
+      h("div", {class: "row", style: "flex:1 1 100%"}, buttons(j)))) : h("div", {class: "note"}, "없습니다."));
+  put($("job"),
+    h("div", {class: "card"}, h("h2", {}, "새 접수 (이름과 구분만 있으면 됩니다)"),
+      h("label", {}, "공사 이름"), f.name, h("div", {class: "row"}, h("div", {}, h("label", {}, "구분"), f.type), h("div", {}, h("label", {}, "접수일"), f.date)),
+      h("label", {}, "발주처"), f.client, h("label", {}, "지시사항"), f.inst,
+      h("div", {class: "row"}, h("div", {}, h("label", {}, "연락처"), f.cname), h("div", {}, h("label", {}, "전화"), f.cphone)),
+      h("div", {style: "margin-top:12px"}, Object.assign(h("button", {}, "접수 (오늘 일지에 함께 남습니다)"), {onclick: save})), msg),
+    group("접수", b["접수"], j => [btn("진행", () => act(j.id, "진행", "date")), btn("보류", () => act(j.id, "보류", "reason")), btn("취소", () => act(j.id, "취소", "reason"))]),
+    group("보류", b["보류"], j => [btn("진행", () => act(j.id, "진행", "date")), btn("취소", () => act(j.id, "취소", "reason"))]),
+    group("진행", b["진행"], j => [btn("시작일 변경", () => act(j.id, "진행", "date")), btn("완공", () => act(j.id, "완공", "date")), btn("보류", () => act(j.id, "보류", "reason"))]),
+    group("완공", b["완공"], j => [btn("민원 접수", async () => { const t = prompt("민원 내용"); if (t) { await api("/api/complaint", {site: j.id, date: today(), title: t}); go("job"); } })]));
 }
 
 let draft = null;
@@ -224,7 +276,7 @@ async function showReport() {
     h("div", {style: "margin-top:12px"}, h("button", {onclick: check}, "확인으로"))), h("div", {class: "card"}, out));
 }
 
-const SHOW = {home: showHome, log: showLog, qty: showQty, report: showReport};
+const SHOW = {job: showJob, home: showHome, log: showLog, qty: showQty, report: showReport};
 async function go(tab) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === tab));
@@ -234,10 +286,13 @@ async function go(tab) {
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => go(b.dataset.tab));
 $("outdoor").onclick = () => document.body.classList.toggle("outdoor");
 $("site").onchange = () => go(document.querySelector("nav button.on").dataset.tab);
-api("/api/sites").then(list => {
-  $("site").replaceChildren(...list.map(s => h("option", {value: s.id}, s.name)));
-  go("home");
-});
+async function reloadSites() {
+  const keep = $("site").value;
+  const list = await api("/api/sites");
+  $("site").replaceChildren(...list.map(s => h("option", {value: s.id}, s.name + (s.status === "진행" ? "" : ` (${s.status})`))));
+  if (list.some(s => s.id === keep)) $("site").value = keep;
+}
+reloadSites().then(() => go("home"));
 </script>
 </body>
 </html>
