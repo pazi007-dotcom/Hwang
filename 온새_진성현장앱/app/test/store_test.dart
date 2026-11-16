@@ -80,8 +80,49 @@ void main() {
       final p = await pair();
       final log = await p.phone.markNoWork(p.site, '2026-11-15');
       expect((await p.phone.mustGet('work_log', log))['no_work'], 1);
-      final e = await p.phone.quickEmergencySite('점촌 긴급복구');
-      expect((await p.phone.mustGet('site', e))['site_type'], '긴급수의');
+    });
+  });
+
+  group('접수', () {
+    test('접수하면 그날 일지와 확인사항이 함께 생긴다', () async {
+      final p = await pair();
+      final e = await p.phone.receive('점촌 긴급복구', '긴급', '2026-11-16',
+          instructions: '준설 30m', contactName: '김주무관', contactPhone: '054-000-0000');
+      final site = await p.phone.mustGet('site', e);
+      expect([site['status'], site['job_type'], site['site_type']], ['접수', '긴급', '긴급수의']);
+      final log = (await p.phone.db.all('work_log')).single;
+      expect(log['content'], '[접수·긴급] 점촌 긴급복구 — 준설 30m');
+      expect((await p.phone.db.all('site_task')).length, 4);
+      expect((await p.phone.dueTasks('2026-11-17', siteId: e)).first['when'], '1일 지남');
+      await sync(p.phone, p.pc);
+      expect((await p.pc.db.all('contact')).single['name'], '김주무관');
+    });
+
+    test('보류는 보관, 투입 없는 취소는 파기, 투입 있는 취소는 보관', () async {
+      final p = await pair();
+      final a = await p.phone.receive('견적 A', '견적', '2026-11-16');
+      await p.phone.hold(a, '예산 미확정');
+      expect(await p.phone.dueTasks('2026-11-20'), isEmpty); // 보류 건은 알리지 않는다
+      await p.phone.proceed(a, plannedStart: '2026-12-01');
+      expect((await p.phone.mustGet('site', a))['planned_start'], '2026-12-01');
+      expect(await p.phone.cancel(a, '발주 취소'), '파기');
+      expect(await p.phone.db.all('work_log'), isEmpty);
+      expect((await p.phone.db.all('site')).length, 1);
+
+      final b = await p.phone.receive('답사만 한 건', '수의', '2026-11-16');
+      await p.phone.addInput(b, '2026-11-16', '장비', '덤프 25톤', 1, p.payee);
+      expect(await p.phone.cancel(b, '계약 무산'), '보관');
+      expect(() => p.phone.addInput(b, '2026-11-17', '장비', '덤프 25톤', 1, p.payee),
+          throwsA(isA<StoreError>()));
+      expect(await p.phone.monthCost(b, '2026-11'), 282000); // 돈은 집계에 남는다
+    });
+
+    test('체크하면 할 일에서 빠진다', () async {
+      final p = await pair();
+      final e = await p.phone.receive('긴급 B', '긴급', '2026-11-16');
+      final first = (await p.phone.dueTasks('2026-11-16', siteId: e)).first;
+      await p.phone.checkTask(first['id'] as String, '2026-11-16');
+      expect((await p.phone.dueTasks('2026-11-16', siteId: e)).length, 3);
     });
   });
 

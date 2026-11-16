@@ -97,3 +97,21 @@ def test_company_info_and_license_check(tmp_path):
     assert company.can_bid(["토공사업"], f)["status"] == "확인 필요"
     assert company.can_bid(["포장공사업"], f) == {"status": "불가", "missing": ["포장공사업"], "note": "면허 없음"}
     assert company.load(tmp_path / "없음.json") == {}
+
+
+def test_phone_proceed_with_start_date_gets_schedule_back(live):
+    """폰에서 접수 건을 '진행 + 시작 예정일'로 바꿔 올리면 서버가 발주·체크를 만들어 내려보낸다."""
+    store, base = live
+    phone = Store(device="phone")
+    send = lambda ch: json.loads(call(base, "/api/sync/push", {"changes": ch})[1])      # noqa: E731
+    fetch = lambda seq: json.loads(call(base, f"/api/sync/pull?since={seq}&device=phone")[1])  # noqa: E731
+    sync.pull(phone, fetch)
+    site = phone.db.execute("SELECT * FROM site WHERE status='접수'").fetchone()
+    before = phone.db.execute("SELECT COUNT(*) FROM site_task WHERE site_id=?", (site["id"],)).fetchone()[0]
+    phone.update("site", site["id"], site["version"], {"status": "진행", "planned_start": "2026-11-20"})
+    sync.push(phone, send)
+    sync.pull(phone, fetch)
+    rows = phone.db.execute("SELECT title, due_date FROM site_task WHERE site_id=? AND source='온새 제안'"
+                            " ORDER BY due_date", (site["id"],)).fetchall()
+    assert len(rows) == 6 and before == 4
+    assert (rows[0]["title"], rows[0]["due_date"]) == ("작업 인원·직종 확정, 전날 재확인", "2026-11-17")

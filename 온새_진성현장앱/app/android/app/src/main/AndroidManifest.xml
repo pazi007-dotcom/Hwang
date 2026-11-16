@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 집 PC 서버와 맞추기(동기화)에 필요 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="jinsung_app"
+        android:label="진성현장"
+        android:usesCleartextTraffic="true"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

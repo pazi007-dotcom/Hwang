@@ -147,7 +147,17 @@ class App:
         return {"log_id": self.store.mark_no_work(site, work_date, weather)}
 
     def sync_push(self, changes, **_):
-        return [sync.apply_change(self.store, c) for c in changes]
+        results = [sync.apply_change(self.store, c) for c in changes]
+        # 폰에서 '진행 + 시작 예정일'이 올라오면 발주·체크 일정을 만든다(물량 계산은 서버 몫)
+        touched = {c["row_id"] for c, r in zip(changes, results)
+                   if c["table_name"] == "site" and r["status"] == "적용" and c["op"] != "삭제"
+                   and ("planned_start" in (c["data_json"] or "") or c["op"] == "추가")}
+        for site_id in touched:
+            row = self.store.db.execute("SELECT status, planned_start FROM site WHERE id=?",
+                                        (site_id,)).fetchone()
+            if row and row["status"] == "진행" and row["planned_start"]:
+                schedule.plan(self.store, site_id)
+        return results
 
     def sync_pull(self, since, device, **_):
         return sync.changes_since(self.store, int(since), exclude_device=device)

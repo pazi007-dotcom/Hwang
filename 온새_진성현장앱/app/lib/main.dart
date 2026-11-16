@@ -75,13 +75,52 @@ class _ShellState extends State<Shell> {
     });
   }
 
-  Future<void> addEmergencySite() async {
-    final name = await askText(context, '긴급 현장 만들기', '현장 이름');
-    if (name == null || name.trim().isEmpty) return;
+  /// 접수: 답사 전이라도 이름과 구분만 넣고 시작한다. 그날 일지에 [접수] 줄이 함께 남는다.
+  Future<void> receiveJob() async {
+    final name = TextEditingController();
+    final inst = TextEditingController();
+    final cname = TextEditingController();
+    final cphone = TextEditingController();
+    var type = jobTypes.first;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('공사 건 접수'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: name, autofocus: true, decoration: const InputDecoration(labelText: '공사 이름')),
+              const SizedBox(height: Tokens.gap),
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: '구분'),
+                items: [for (final j in jobTypes) DropdownMenuItem(value: j, child: Text(j))],
+                onChanged: (v) => setD(() => type = v ?? type),
+              ),
+              const SizedBox(height: Tokens.gap),
+              TextField(controller: inst, maxLines: 3, decoration: const InputDecoration(labelText: '지시사항·확인사항')),
+              const SizedBox(height: Tokens.gap),
+              TextField(controller: cname, decoration: const InputDecoration(labelText: '연락처 이름')),
+              const SizedBox(height: Tokens.gap),
+              TextField(controller: cphone, keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: '전화번호')),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('접수')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
     try {
-      final id = await widget.store.quickEmergencySite(name);
+      final id = await widget.store.receive(name.text, type, workDateOf(DateTime.now()),
+          instructions: inst.text, contactName: cname.text, contactPhone: cphone.text);
       siteId = id;
       await reload();
+      if (mounted) showMessage(context, '접수했습니다. 오늘 일지에 함께 남겼습니다.');
     } on StoreError catch (e) {
       if (mounted) showMessage(context, e.message);
     }
@@ -91,7 +130,8 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final t = widget.tokens;
     final pages = [
-      HomePage(key: ValueKey('h$version$siteId'), store: widget.store, siteId: siteId, tokens: t),
+      HomePage(key: ValueKey('h$version$siteId'), store: widget.store, siteId: siteId, tokens: t,
+          onChanged: reload),
       LogPage(key: ValueKey('l$version$siteId'), store: widget.store, siteId: siteId, tokens: t,
           onChanged: reload),
       SyncPage(key: ValueKey('s$version'), store: widget.store, tokens: t, onChanged: reload),
@@ -115,7 +155,11 @@ class _ShellState extends State<Shell> {
                   decoration: const InputDecoration(labelText: '현장'),
                   items: [
                     for (final s in sites)
-                      DropdownMenuItem(value: s['id'] as String, child: Text(s['name'] as String)),
+                      DropdownMenuItem(
+                          value: s['id'] as String,
+                          child: Text(
+                              '${s['name']}${(s['status'] ?? '진행') == '진행' ? '' : ' (${s['status']})'}',
+                              overflow: TextOverflow.ellipsis)),
                   ],
                   onChanged: (v) => setState(() {
                     siteId = v;
@@ -124,8 +168,8 @@ class _ShellState extends State<Shell> {
                 ),
               ),
               SizedBox(
-                width: 120,
-                child: OutlinedButton(onPressed: addEmergencySite, child: const Text('+ 긴급 현장')),
+                width: 96,
+                child: OutlinedButton(onPressed: receiveJob, child: const Text('+ 접수')),
               ),
             ]),
           ),
@@ -223,10 +267,43 @@ Future<String?> askText(BuildContext context, String title, String label, {Strin
 
 // ───────────────────────── 홈 ─────────────────────────
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.store, required this.siteId, required this.tokens});
+  const HomePage({super.key, required this.store, required this.siteId, required this.tokens,
+      required this.onChanged});
   final Store store;
   final String? siteId;
   final Tokens tokens;
+  final Future<void> Function() onChanged;
+
+  /// 공사 건 상태 바꾸기: 진행 / 보류 / 취소 / 완공.
+  Future<void> _act(BuildContext context, String action) async {
+    final today = workDateOf(DateTime.now());
+    try {
+      if (action == '진행') {
+        final d = await askText(context, '진행', '시작 예정일 (비우면 일정 없이 진행)', initial: today);
+        if (d == null) return;
+        await store.proceed(siteId!, plannedStart: d.trim());
+        if (context.mounted) showMessage(context, '진행으로 바꿨습니다. 집 PC와 맞추면 발주·체크 일정이 만들어집니다.');
+      } else if (action == '완공') {
+        final d = await askText(context, '완공', '완공일', initial: today);
+        if (d == null) return;
+        await store.complete(siteId!, d.trim());
+      } else {
+        final r = await askText(context, action, '$action 사유');
+        if (r == null) return;
+        if (action == '보류') {
+          await store.hold(siteId!, r);
+        } else {
+          final result = await store.cancel(siteId!, r);
+          if (context.mounted) {
+            showMessage(context, result == '파기' ? '투입이 없어 파기했습니다.' : "투입 기록이 있어 '취소'로 보관했습니다.");
+          }
+        }
+      }
+      await onChanged();
+    } on StoreError catch (e) {
+      if (context.mounted) showMessage(context, e.message);
+    }
+  }
 
   Future<Map<String, dynamic>> _load() async {
     final today = workDateOf(DateTime.now());
@@ -244,6 +321,8 @@ class HomePage extends StatelessWidget {
         },
     ];
     return {
+      'site': await store.mustGet('site', id),
+      'tasks': await store.dueTasks(today, siteId: id),
       'today': today,
       'hasToday': logs.any((l) => l['work_date'] == today),
       'cost': await store.monthCost(id, today.substring(0, 7)),
@@ -268,12 +347,63 @@ class HomePage extends StatelessWidget {
       builder: (context, snap) {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final d = snap.data!;
+        final site = d['site'] as Rec;
+        final status = (site['status'] ?? '진행') as String;
+        final tasks = d['tasks'] as List<Rec>;
+        final actions = switch (status) {
+          '접수' => ['진행', '보류', '취소'],
+          '보류' => ['진행', '취소'],
+          '진행' => ['완공', '보류', '취소'],
+          _ => <String>[],
+        };
         final todo = <String>[
-          if (!(d['hasToday'] as bool)) '오늘 일지 미작성',
+          if (!(d['hasToday'] as bool) && status == '진행') '오늘 일지 미작성',
           if ((d['conflicts'] as int) > 0) '충돌 검토 ${d['conflicts']}건',
           if ((d['pending'] as int) > 0) '집 PC로 보낼 기록 ${d['pending']}건',
         ];
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
+          Section(title: '공사 건', children: [
+            Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Badge2(status, status == '진행' ? t.ok : t.warn),
+              if (site['job_type'] != null) Badge2(site['job_type'] as String, t.blue),
+              if (site['planned_start'] != null) Text('시작 예정 ${site['planned_start']}'),
+            ]),
+            if ((site['instructions'] ?? '') != '')
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text(site['instructions'] as String)),
+            if ((site['status_reason'] ?? '') != '')
+              Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('사유: ${site['status_reason']}', style: Theme.of(context).textTheme.bodySmall)),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: Tokens.gap),
+              Row2(children: [
+                for (final a in actions)
+                  Expanded(child: OutlinedButton(onPressed: () => _act(context, a), child: Text(a))),
+              ]),
+            ],
+          ]),
+          const SizedBox(height: Tokens.gap),
+          Section(title: '발주·체크 (기한순)', children: [
+            if (tasks.isEmpty) Text('이틀 안에 챙길 일이 없습니다.', style: Theme.of(context).textTheme.bodySmall),
+            for (final k in tasks.take(8))
+              InkWell(
+                onTap: () async {
+                  await store.checkTask(k['id'] as String, d['today'] as String);
+                  await onChanged();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(Icons.check_box_outline_blank, color: t.sub),
+                    const SizedBox(width: 8),
+                    Badge2(k['when'] as String, (k['late'] as bool) ? t.bad : t.warn),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text('${k['title']}${k['qty'] != null ? ' ${k['qty']}${k['unit'] ?? ''}' : ''}')),
+                  ]),
+                ),
+              ),
+          ]),
+          const SizedBox(height: Tokens.gap),
           Section(title: '이달', children: [
             Row(children: [
               Expanded(child: bigNumber(context, '투입 원가', wonText(d['cost'] as int), '원', t)),
