@@ -13,10 +13,11 @@ import 'package:uuid/uuid.dart';
 import 'row_db.dart';
 
 const kinds = ['인력', '장비', '자재', '외주'];
-const jobTypes = ['긴급', '견적', '수의', '입찰', '민원', '기타'];
+const jobTypes = ['공사', '긴급', '견적', '수의', '입찰', '민원', '기타'];
 
 /// 접수하자마자 생기는 필수 확인사항 (구분별).
 const firstChecks = {
+  '공사': ['착공계·현장대리인 서류 확인', '도면·내역 받기', '관급자재 배정 확인', '현장 안전 시설 확인'],
   '긴급': ['현장 위치·진입로 확인', '피해 범위 사진(전) 촬영', '발주처 지시 내용·범위 문서(문자)로 받기', '필요 장비·인력 즉시 수배'],
   '견적': ['현장 답사', '물량 실측(연장·폭·높이)', '견적서 제출 기한 확인'],
   '수의': ['현장 답사', '계약 금액·공기 확인', '도면·내역 수령', '착수 서류 확인'],
@@ -140,7 +141,7 @@ class Store {
       {String? instructions, String? contactName, String? contactPhone}) async {
     if (!jobTypes.contains(jobType)) throw StoreError('접수 구분은 $jobTypes 중 하나입니다.');
     final day = parseWorkDate(receivedDate);
-    final siteType = jobType == '입찰' ? '정식' : (jobType == '민원' || jobType == '기타') ? '보수기타' : '긴급수의';
+    final siteType = (jobType == '입찰' || jobType == '공사') ? '정식' : (jobType == '민원' || jobType == '기타') ? '보수기타' : '긴급수의';
     final note = (instructions == null || instructions.trim().isEmpty) ? null : instructions.trim();
     final site = await createSite(name, siteType: siteType, status: '접수', jobType: jobType,
         receivedDate: day, instructions: note);
@@ -155,8 +156,9 @@ class Store {
     }
     final logId = await logFor(site, day);
     final row = await mustGet('work_log', logId);
+    // 접수 기록은 특이사항(note)에 남긴다. 작업 내용(content)은 소장이 쓰는 칸이라 비워 둔다.
     await update('work_log', logId, row['version'] as int,
-        {'content': '[접수·$jobType] ${name.trim()}${note == null ? '' : ' — $note'}'});
+        {'note': '[접수·$jobType] ${name.trim()}${note == null ? '' : ' — $note'}'});
     return site;
   }
 

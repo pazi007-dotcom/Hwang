@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from .store import Store, StoreError, parse_work_date
 
-JOB_TYPES = ("긴급", "견적", "수의", "입찰", "민원", "기타")
-_SITE_TYPE = {"긴급": "긴급수의", "수의": "긴급수의", "견적": "긴급수의", "입찰": "정식",
+JOB_TYPES = ("공사", "긴급", "견적", "수의", "입찰", "민원", "기타")  # 공사 = 이미 계약한 공사
+_SITE_TYPE = {"공사": "정식", "긴급": "긴급수의", "수의": "긴급수의", "견적": "긴급수의", "입찰": "정식",
               "민원": "보수기타", "기타": "보수기타"}
 # 접수하자마자 생기는 필수 확인사항 (구분별)
 FIRST_CHECKS = {
+    "공사": ["착공계·현장대리인 서류 확인", "도면·내역 받기", "관급자재 배정 확인", "현장 안전 시설 확인"],
     "긴급": ["현장 위치·진입로 확인", "피해 범위 사진(전) 촬영", "발주처 지시 내용·범위 문서(문자)로 받기",
              "필요 장비·인력 즉시 수배"],
     "견적": ["현장 답사", "물량 실측(연장·폭·높이)", "견적서 제출 기한 확인"],
@@ -45,7 +46,7 @@ def receive(store: Store, name: str, job_type: str, received_date: str, *, clien
     log_id = store.log_for(site, day)
     row = store.get("work_log", log_id)
     text = f"[접수·{job_type}] {name}" + (f" — {instructions}" if instructions else "")
-    store.update("work_log", log_id, row["version"], {"content": text})
+    store.update("work_log", log_id, row["version"], {"note": text})   # 작업 내용(content)은 소장 몫
     return site
 
 
@@ -110,8 +111,8 @@ def complaint(store: Store, site_id: str, received_date: str, title: str, *, con
     task = add_task(store, site_id, "민원", title, due_date=day, note=note)
     log_id = store.log_for(site_id, day)
     row = store.get("work_log", log_id)
-    text = "; ".join(x for x in [row["content"], f"[민원] {title}"] if x)
-    store.update("work_log", log_id, row["version"], {"content": text})
+    text = "; ".join(x for x in [row["note"], f"[민원] {title}"] if x)
+    store.update("work_log", log_id, row["version"], {"note": text})
     return task
 
 

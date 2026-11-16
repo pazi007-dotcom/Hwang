@@ -91,7 +91,8 @@ void main() {
       final site = await p.phone.mustGet('site', e);
       expect([site['status'], site['job_type'], site['site_type']], ['접수', '긴급', '긴급수의']);
       final log = (await p.phone.db.all('work_log')).single;
-      expect(log['content'], '[접수·긴급] 점촌 긴급복구 — 준설 30m');
+      expect(log['note'], '[접수·긴급] 점촌 긴급복구 — 준설 30m');
+      expect(log['content'], isNull); // 작업 내용 칸은 소장 몫
       expect((await p.phone.db.all('site_task')).length, 4);
       expect((await p.phone.dueTasks('2026-11-17', siteId: e)).first['when'], '1일 지남');
       await sync(p.phone, p.pc);

@@ -26,7 +26,8 @@ def test_receive_writes_log_first_and_makes_checks(s):
     row = s.get("site", site)
     assert (row["status"], row["job_type"], row["site_type"]) == ("접수", "긴급", "긴급수의")
     log = s.db.execute("SELECT * FROM work_log WHERE site_id=?", (site,)).fetchone()
-    assert log["work_date"] == "2026-11-16" and log["content"].startswith("[접수·긴급] 점촌 배수로 긴급복구")
+    assert log["work_date"] == "2026-11-16" and log["note"].startswith("[접수·긴급] 점촌 배수로 긴급복구")
+    assert log["content"] is None
     titles = [t["title"] for t in tasks(s, site)]
     assert "피해 범위 사진(전) 촬영" in titles and titles[-1] == "마을 이장 연락"
     assert s.db.execute("SELECT name FROM contact WHERE site_id=?", (site,)).fetchone()["name"] == "김주무관"
@@ -125,9 +126,9 @@ def test_complete_then_complaint_stays_on_same_site(s):
     intake.complaint(s, site, "2027-03-02", "벽체 누수 민원", contact={"name": "이장님", "phone": "010-0000-0000"})
     kim = s.create_payee("김반장", "개인")
     s.add_input(site, "2027-03-03", "인력", "보통인부", 1, kim)   # 민원 처리 비용도 같은 현장으로
-    log = s.db.execute("SELECT content FROM work_log WHERE site_id=? AND work_date='2027-03-02'",
+    log = s.db.execute("SELECT note FROM work_log WHERE site_id=? AND work_date='2027-03-02'",
                        (site,)).fetchone()
-    assert log["content"] == "[민원] 벽체 누수 민원"
+    assert log["note"] == "[민원] 벽체 누수 민원"
     assert schedule.due(s, "2027-03-02")[-1]["title"] == "벽체 누수 민원"
 
 

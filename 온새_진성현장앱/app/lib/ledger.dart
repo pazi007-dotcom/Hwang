@@ -25,6 +25,7 @@ class PayeeTotal {
   int lines = 0;
   num manDays = 0; // 인력 공수
   num equipDays = 0; // 장비 일수
+  final Map<String, num> equipment = {}; // '덤프 25톤|대' → 수량
   int get balance => total + carry - paid;
 }
 
@@ -39,6 +40,7 @@ class SiteTotal {
   num manDays = 0;
   num equipDays = 0;
   final Map<String, num> materials = {}; // '레미콘 25-21-08|㎥' → 수량
+  final Map<String, num> equipment = {}; // '덤프 25톤|대' → 수량 (일 단위가 아닌 장비도 보이게)
   int get workDays => inputDays.length;
   int get total => byKind.values.fold(0, (a, b) => a + b);
 }
@@ -126,6 +128,12 @@ extension Ledger on Store {
   Future<void> deleteLine(String lineId, {String? reason}) async {
     final row = await mustGet('input_line', lineId);
     await delete('input_line', lineId, row['version'] as int, reason: reason ?? '일지에서 삭제');
+  }
+
+  Future<void> setWeather(String siteId, String workDate, String weather) async {
+    final logId = await logFor(siteId, workDate);
+    final row = await mustGet('work_log', logId);
+    await update('work_log', logId, row['version'] as int, {'weather': weather});
   }
 
   Future<void> setLogContent(String siteId, String workDate, String content) async {
@@ -322,6 +330,10 @@ extension Ledger on Store {
       p.lines++;
       if (l['kind'] == '인력') p.manDays += num.parse(l['qty'] as String);
       if (l['kind'] == '장비' && l['unit'] == '일') p.equipDays += num.parse(l['qty'] as String);
+      if (l['kind'] == '장비') {
+        p.equipment.update('${l['item']}|${l['unit']}', (v) => v + num.parse(l['qty'] as String),
+            ifAbsent: () => num.parse(l['qty'] as String));
+      }
     }
     // 이월: 이전 달까지 투입 − 이전 달 청구분 지급
     final logs = {for (final l in await db.all('work_log')) l['id']: l['work_date'] as String};
@@ -374,6 +386,9 @@ extension Ledger on Store {
       s.byKind[l['kind'] as String] = s.byKind[l['kind']]! + (l['amount'] as int);
       if (l['kind'] == '인력') s.manDays += q;
       if (l['kind'] == '장비' && l['unit'] == '일') s.equipDays += q;
+      if (l['kind'] == '장비') {
+        s.equipment.update('${l['item']}|${l['unit']}', (v) => v + q, ifAbsent: () => q);
+      }
       if (l['kind'] == '자재') {
         final key = '${l['item']} ${l['spec'] ?? ''}'.trim();
         s.materials.update('$key|${l['unit']}', (v) => v + q, ifAbsent: () => q);
@@ -403,7 +418,7 @@ extension Ledger on Store {
       b.writeln('■ ${p.name}  ${w(p.balance)}원');
       final parts = <String>[
         if (p.manDays > 0) '${fmtQty(p.manDays)}공수',
-        if (p.equipDays > 0) '${fmtQty(p.equipDays)}일',
+        for (final e in p.equipment.entries) '${e.key.split('|')[0]} ${fmtQty(e.value)}${e.key.split('|')[1]}',
         for (final e in p.bySite.entries) '${e.key} ${w(e.value)}',
         if (p.carry != 0) '이월 ${w(p.carry)}',
         if (p.paid != 0) '지급 ${w(p.paid)}',
@@ -414,7 +429,8 @@ extension Ledger on Store {
     b.writeln('[현장별]');
     for (final s in sites) {
       b.writeln('■ ${s.name}  ${w(s.total)}원 (작업 ${s.workDays}일${s.restDays.isEmpty ? '' : ' · 쉼 ${s.restDays.length}일'})');
-      b.writeln('  인력 ${fmtQty(s.manDays)}공수 ${w(s.byKind['인력']!)} / 장비 ${fmtQty(s.equipDays)}일 ${w(s.byKind['장비']!)}'
+      final eq = s.equipment.entries.map((e) => '${e.key.split('|')[0]} ${fmtQty(e.value)}${e.key.split('|')[1]}').join(', ');
+      b.writeln('  인력 ${fmtQty(s.manDays)}공수 ${w(s.byKind['인력']!)} / 장비${eq.isEmpty ? '' : '($eq)'} ${w(s.byKind['장비']!)}'
           ' / 자재 ${w(s.byKind['자재']!)} / 외주 ${w(s.byKind['외주']!)}');
     }
     return b.toString().trimRight();

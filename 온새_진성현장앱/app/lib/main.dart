@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -505,12 +507,25 @@ class _LogPageState extends State<LogPage> {
     return (q == null || p == null) ? null : (q * p).round();
   }
 
+  Timer? _debounce;
+  void _fillSoon() {
+    setState(() {});
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _fill);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
   Future<void> _fill() async {
     // 항목·받는 곳이 정해지면 단가·단위를 미리 채운다(직접 고친 단가는 건드리지 않음)
     final sg = await s.suggest(kind, item.text, payee.text, workDate);
     if (!mounted) return;
     setState(() {
-      if (sg.price != null && !priceTouched) price.text = sg.price.toString();
+      if (!priceTouched) price.text = sg.price?.toString() ?? price.text;
       if (sg.unit != null) unit.text = sg.unit!;
       if (sg.spec != null && spec.text.isEmpty) spec.text = sg.spec!;
     });
@@ -581,6 +596,7 @@ class _LogPageState extends State<LogPage> {
         payee.clear();
         note.clear();
         qty.text = '1';
+        priceTouched = false;
         refresh++;
       });
       await widget.onChanged();
@@ -747,8 +763,26 @@ class _LogPageState extends State<LogPage> {
               Expanded(child: OutlinedButton(onPressed: _pickDate, child: Text(workDate))),
               Expanded(child: OutlinedButton(onPressed: _copyLast, child: const Text('어제와 같이'))),
             ]),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final w in const ['맑음', '흐림', '비', '눈', '한파', '폭염'])
+                ChoiceChip(
+                  label: Text(w),
+                  selected: log?['weather'] == w,
+                  onSelected: (_) async {
+                    try {
+                      await s.setWeather(widget.siteId!, workDate, w);
+                      setState(() => refresh++);
+                    } on StoreError catch (e) {
+                      if (context.mounted) showMessage(context, e.message);
+                    }
+                  },
+                ),
+            ]),
             if (log?['no_work'] == 1)
               Padding(padding: const EdgeInsets.only(top: 8), child: Badge2('작업 없음 (${log!['weather'] ?? ''})', t.warn)),
+            if ((log?['note'] ?? '') != '')
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text(log!['note'] as String, style: Theme.of(context).textTheme.bodySmall)),
           ]),
           const SizedBox(height: Tokens.gap),
           Section(title: '2. 투입 한 줄 넣기', children: [
@@ -763,7 +797,7 @@ class _LogPageState extends State<LogPage> {
               key: const ValueKey('f_item'),
               controller: item,
               decoration: InputDecoration(labelText: kind == '인력' ? '직종 (보통인부, 형틀목공 …)' : kind == '장비' ? '장비 (6W, 덤프 25톤 …)' : kind == '자재' ? '자재 (레미콘, 와이어메쉬 …)' : '외주 내용'),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => _fillSoon(),
               onEditingComplete: _fill,
             ),
             _chips(d['items'] as List<String>, item, _fill),
@@ -776,7 +810,7 @@ class _LogPageState extends State<LogPage> {
               key: const ValueKey('f_payee'),
               controller: payee,
               decoration: InputDecoration(labelText: kind == '인력' ? '받는 사람 (이름 또는 팀)' : '받는 업체'),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => _fillSoon(),
               onEditingComplete: _fill,
             ),
             _chips(d['payees'] as List<String>, payee, _fill),
@@ -1054,7 +1088,8 @@ class _PayPageState extends State<PayPage> {
                         [
                           p.kinds.join('·'),
                           if (p.manDays > 0) '${fmtQty(p.manDays)}공수',
-                          if (p.equipDays > 0) '${fmtQty(p.equipDays)}일',
+                          for (final e in p.equipment.entries)
+                            '${e.key.split('|')[0]} ${fmtQty(e.value)}${e.key.split('|')[1]}',
                           '${p.lines}줄',
                         ].join(' · '),
                         style: Theme.of(context).textTheme.bodySmall),
@@ -1084,8 +1119,11 @@ class _PayPageState extends State<PayPage> {
                     Expanded(child: Text(x.name, style: const TextStyle(fontWeight: FontWeight.w700))),
                     Text('${wonText(x.total)}원', style: const TextStyle(fontWeight: FontWeight.w700)),
                   ]),
-                  Text('작업 ${x.workDays}일${x.restDays.isEmpty ? '' : ' · 쉼 ${x.restDays.length}일'} · 인력 ${fmtQty(x.manDays)}공수 · 장비 ${fmtQty(x.equipDays)}일',
+                  Text('작업 ${x.workDays}일${x.restDays.isEmpty ? '' : ' · 쉼 ${x.restDays.length}일'} · 인력 ${fmtQty(x.manDays)}공수',
                       style: Theme.of(context).textTheme.bodySmall),
+                  for (final e in x.equipment.entries)
+                    Text('  ${e.key.split('|')[0]}  ${fmtQty(e.value)}${e.key.split('|')[1]}',
+                        style: Theme.of(context).textTheme.bodySmall),
                   Wrap(spacing: 12, children: [
                     for (final k in kinds) Text('$k ${wonText(x.byKind[k]!)}', style: Theme.of(context).textTheme.bodySmall),
                   ]),
