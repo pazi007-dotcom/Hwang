@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import alerts, excel_report, intake, mailer, reports, schedule, stations, sync, voice_log
+from . import alerts, excel_ceo, excel_report, intake, mailer, reports, schedule, stations, sync, voice_log
 from .store import Store, StoreError
 from .templates import IMPLEMENTED
 
@@ -134,9 +134,9 @@ class App:
     def precheck(self, month, until=None, **_):
         return mailer.precheck(self.store, month, until)
 
-    def monthly_file(self, month, **_) -> Path:
-        return excel_report.build_monthly(self.store, month, self.out_dir,
-                                          corrected=self.store.is_locked(month))
+    def monthly_file(self, month, detail=None, **_) -> Path:
+        build = excel_report.build_monthly if detail else excel_ceo.build_report
+        return build(self.store, month, self.out_dir, corrected=self.store.is_locked(month))
 
     # ---- 쓰기 ----
     def voice_parse(self, site, text, **_):

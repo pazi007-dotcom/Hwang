@@ -15,7 +15,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Callable
 
-from . import excel_report, payout, reports
+from . import excel_ceo, excel_report, payout, reports
 from .store import Store, StoreError, new_id
 
 
@@ -53,7 +53,7 @@ def compose(store: Store, month: str) -> dict:
     no_acc = [o["name"] for o in pos if not o["bank"]]
     body = "\n".join([
         f"1. 결제 요청: {sum(o['transfer'] for o in pos):,}원 ({' / '.join(groups) or '없음'})"
-        " — 사람·업체별 계좌·금액은 첨부 「이체목록」, 날짜별 근거는 「출역표」 시트"
+        " — 계좌·금액은 첨부 Excel 「월말보고」, 날짜·현장별 근거는 「출역표」 시트"
         + (f" ※ 계좌 확인 필요: {', '.join(no_acc)}" if no_acc else ""),
         f"2. 이달 투입 {check['total']:,}원 — 현장별: {per_site or '없음'}",
         f"3. 확인이 필요한 차이: {check['diffs']}건",
@@ -69,7 +69,8 @@ def send_monthly(store: Store, month: str, out_dir, recipients: list[str], *, co
     if store.open_conflicts():
         raise StoreError("충돌 검토가 남아 있습니다. 먼저 골라 주세요.")
     mail = compose(store, month)
-    path = excel_report.build_monthly(store, month, out_dir, corrected=mail["corrected"])
+    path = excel_ceo.build_report(store, month, out_dir, corrected=mail["corrected"])
+    excel_report.build_monthly(store, month, out_dir, corrected=mail["corrected"])   # 상세는 집 PC에 남김
     report_id = store._insert("report_log", {
         "report_type": "월말보고", "period": month, "file_name": path.name,
         "sent_to": ", ".join(recipients), "result": "대기"})

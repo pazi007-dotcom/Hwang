@@ -2,7 +2,7 @@
 
 - 결제가 첫 번째: 결제요약 → 현장별투입 → 인력 → 장비 → 자재 → (외주) → 거래명세서 → 자재배정대비.
 - 요약의 모든 합계는 상세 시트 줄을 더한 수식(SUMIFS)이다. 요약과 상세가 어긋날 수 없다.
-- 파일은 언제든 원본 데이터에서 다시 만든다. 파일명: 월말보고_2026-11.xlsx (정정본은 _정정).
+- 파일은 언제든 원본 데이터에서 다시 만든다. 파일명: 월말상세_2026-11.xlsx (정정본은 _정정). 대표님 보고용 3장짜리는 excel_ceo.py (월말보고_).
 - A4 흑백 인쇄 기준: 색 대신 굵기·선, 머리글 반복, 매크로 없음.
 """
 from __future__ import annotations
@@ -341,7 +341,7 @@ def build_monthly(store: Store, month: str, out_dir: str | Path, corrected: bool
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / report_file_name("월말보고", month, corrected=corrected)
+    path = out_dir / report_file_name("월말상세", month, corrected=corrected)
     wb.save(path)
     return path
 

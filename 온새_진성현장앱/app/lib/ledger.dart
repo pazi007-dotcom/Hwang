@@ -79,8 +79,10 @@ extension Ledger on Store {
     final it = item.trim();
     if (it.isEmpty) throw StoreError('항목(직종·장비·자재 이름)을 적어 주세요.');
     final u = unit.trim().isEmpty ? defaultUnit[kind]! : unit.trim();
-    final price = int.tryParse(unitPrice.toString().replaceAll(',', '').trim());
-    if (price == null || price < 0) throw StoreError('단가를 숫자로 적어 주세요. (0원도 됩니다)');
+    final raw = unitPrice.toString().replaceAll(',', '').trim();
+    // 자재는 단가를 몰라도 수량만 넣을 수 있다(보고서에 금액 공란 · 「단가 미입력」)
+    final price = raw.isEmpty && kind == '자재' ? 0 : int.tryParse(raw);
+    if (price == null || price < 0) throw StoreError('단가를 숫자로 적어 주세요. (자재는 비워도 됩니다)');
     final q = cleanQty(qty);
     final logId = await logFor(siteId, workDate, reason: reason);
     final wd = (await mustGet('work_log', logId))['work_date'] as String;

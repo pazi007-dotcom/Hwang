@@ -1,5 +1,6 @@
 // 폰 저장 규칙·동기화 (설계안 3장, 12장 검증 계획). 서버 tests/ 와 같은 사례를 폰 코드로 확인한다.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jinsung_app/ledger.dart';
 import 'package:jinsung_app/row_db.dart';
 import 'package:jinsung_app/stations.dart';
 import 'package:jinsung_app/store.dart';
@@ -188,5 +189,14 @@ void main() {
     expect(formatSta(50), 'No.2+10');
     expect(formatSta(240), 'No.12');
     expect(() => parseSta('No.2+25'), throwsA(isA<StoreError>()));
+  });
+
+  test('자재는 단가 없이 수량만 넣을 수 있다 (금액 0 → 보고서 공란)', () async {
+    final s = Store(MemoryDb(), device: 'phone');
+    final site = await s.receive('요성리', '공사', '2026-11-01');
+    await s.addLine(siteId: site, workDate: '2026-11-14', kind: '자재', item: '모래', qty: 5, unit: '㎥', unitPrice: '', payee: '문경골재');
+    expect((await s.db.all('input_line')).single['amount'], 0);
+    expect(() => s.addLine(siteId: site, workDate: '2026-11-14', kind: '인력', item: '보통인부', qty: 1, unit: '인', unitPrice: '', payee: '김반장'),
+        throwsA(isA<StoreError>()));
   });
 }

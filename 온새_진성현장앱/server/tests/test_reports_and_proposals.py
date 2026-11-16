@@ -45,7 +45,7 @@ def test_monthly_excel_sheets_and_formulas(world, tmp_path):
     s = world["s"]
     s.add_invoice(world["dump"], "2026-11-12", "장비", "덤프 25톤", 4, 4 * 282_000)   # 명세서는 4대
     path = excel_report.build_monthly(s, "2026-11", tmp_path)
-    assert path.name == "월말보고_2026-11.xlsx"
+    assert path.name == "월말상세_2026-11.xlsx"
     wb = load_workbook(path)
     assert wb.sheetnames == ["결제요약", "이체목록", "현장별투입", "출역표", "인력", "장비", "자재", "거래명세서", "자재배정대비"]
     ws = wb["결제요약"]
@@ -368,3 +368,34 @@ def test_phone_request_without_mail_setup_waits_in_outbox(world, tmp_path):
     req = s.db.execute("SELECT * FROM pay_request").fetchone()
     assert req["status"] == "보낼 함 대기"
     assert s.db.execute("SELECT COUNT(*) AS n FROM mail_outbox WHERE status='대기'").fetchone()["n"] == 1
+
+
+# ---------- 대표님 보고 Excel 3장: 월말보고 · 출역표(1~31일, 현장별) · 자재(관급 과부족, 사급 거래처·금액) ----------
+def test_ceo_report_three_sheets(world, tmp_path):
+    from jinsung import excel_ceo
+    fill_november(world)
+    s = world["s"]
+    sand = s.create_payee("문경골재")
+    s.add_input(world["site"], "2026-11-14", "자재", "모래", 5, sand, unit="㎥", unit_price=0)        # 단가 미입력
+    s.add_input(world["site"], "2026-11-15", "자재", "잡석", 4, sand, unit="㎥", unit_price=30000)
+    s.add_input(world["emg"], "2026-11-12", "인력", "보통인부", "0.5", world["kim"])
+    path = excel_ceo.build_report(s, "2026-11", tmp_path)
+    assert path.name == "월말보고_2026-11.xlsx"
+    wb = load_workbook(path)
+    assert wb.sheetnames == ["월말보고", "출역표", "자재"]
+    # 출역표: 1~30일 열, 김반장은 두 현장 → 현장 줄 2개 + 「계」 줄
+    ws = wb["출역표"]
+    head = [c.value for c in ws[4]]
+    assert head[4] == "1" and head[4 + 29] == "30" and "31" not in head
+    rows = [[c.value for c in r] for r in ws.iter_rows(min_row=6)]
+    kim = [r for r in rows if r[1] in ("김반장", "김반장 계") or (r[1] is None and r[3])][:3]
+    assert [r[3] for r in kim[:2]] == sorted([s.get("site", world["site"])["name"], s.get("site", world["emg"])["name"]])
+    total = next(r for r in rows if r[1] == "김반장 계")
+    assert total[0] == "작업자" and str(total[4 + 12]).startswith("=IF(SUM(")       # 13일: 두 현장 합
+    # 자재: 관급(배정) 줄과 사급 거래처·금액, 단가 미입력은 공란
+    mat = [[c.value for c in r] for r in wb["자재"].iter_rows(min_row=6)]
+    remicon = next(r for r in mat if r[2] == "레미콘" and r[3] == "25-21-08")
+    assert remicon[6] == 8 and str(remicon[8]).startswith("=F")
+    sand_rows = [r for r in mat if r[2] == "문경골재"]
+    assert [(r[3], r[9]) for r in sand_rows] == [("모래", None), ("잡석", 120000)]
+    assert sand_rows[0][10] == "단가 미입력"
