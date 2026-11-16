@@ -1,6 +1,5 @@
 // 사람이 누르는 순서 그대로 화면을 조작하는 시험 (기준 정보가 하나도 없는 새 폰에서 시작).
 // 화면이 넘치면(RenderFlex overflow) 시험이 실패한다 → 화면 잘림 검사를 겸한다.
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jinsung_app/ledger.dart';
 import 'package:jinsung_app/main.dart';
@@ -120,7 +119,7 @@ void main() {
       expect(pay['대성중기']!.bySite, {'점촌 긴급복구': 340000, '요성리 용배수로': 340000});
       expect(pay['김반장']!.total, 187000);
       expect(pay['김반장']!.manDays, 1);
-      expect(find.text('작업자 2명 · 374,000원'), findsOneWidget); // 김반장·이씨 따로. 하루 소득세 999원 → 1,000원 미만이라 안 뗌
+      await scrollTo(t, find.text('작업자 2명 · 374,000원')); // 김반장·이씨 따로. 하루 소득세 999원 → 1,000원 미만이라 안 뗌
       expect(find.text('김반장'), findsOneWidget);
       await scrollTo(t, find.byKey(const ValueKey('po_대성중기')));
       expect(find.text('대성중기'), findsOneWidget);
