@@ -33,10 +33,13 @@ class SiteTotal {
   final String siteId;
   final String name;
   final Map<String, int> byKind = {for (final k in kinds) k: 0};
-  final Set<String> days = {};
+  final Set<String> days = {}; // 일지가 있는 날 (접수만 한 날 포함)
+  final Set<String> restDays = {}; // 그중 '작업 없음'(비 등)
+  final Set<String> inputDays = {}; // 투입이 있었던 날 = 작업한 날
   num manDays = 0;
   num equipDays = 0;
   final Map<String, num> materials = {}; // '레미콘 25-21-08|㎥' → 수량
+  int get workDays => inputDays.length;
   int get total => byKind.values.fold(0, (a, b) => a + b);
 }
 
@@ -79,6 +82,11 @@ extension Ledger on Store {
     final logId = await logFor(siteId, workDate, reason: reason);
     final wd = (await mustGet('work_log', logId))['work_date'] as String;
     final payeeId = await ensurePayee(payee, kind: kind);
+    final site = await mustGet('site', siteId!);
+    if (site['status'] == '접수') {
+      // 투입이 들어왔다 = 실제로 일을 시작했다 → 진행 (긴급 건은 접수 당일 바로 일한다)
+      await update('site', siteId, site['version'] as int, {'status': '진행'});
+    }
     final sp = spec.trim();
     if (await findRate(kind, it, sp, null, wd) == null) {
       await insert('rate', {
@@ -184,26 +192,100 @@ extension Ledger on Store {
     return (price: null, unit: null, spec: null);
   }
 
-  /// 어제와 같이: 이 현장의 가장 최근 일지(작업일 이전)의 투입을 그대로 복사한다.
-  Future<int> copyLastDay(String siteId, String workDate) async {
+  /// 어제와 같이: 이 현장의 가장 최근 일지(작업일 이전)에서 복사할 후보.
+  /// 기본 선택: 인력은 켬, 장비는 그 전날에도 있었던(매일 쓰는) 것만 켬, 자재·외주는 끔.
+  /// → 타설한 날의 레미콘·펌프카가 다음 날로 끌려가 쌓이는 일을 막는다.
+  Future<({String? from, List<({Rec line, String payee, bool pick})> items})> copyCandidates(
+      String siteId, String workDate) async {
     final logs = (await db.all('work_log'))
         .where((l) => l['site_id'] == siteId && (l['work_date'] as String).compareTo(workDate) < 0)
         .toList()
       ..sort((a, b) => (b['work_date'] as String).compareTo(a['work_date'] as String));
-    for (final log in logs) {
-      final lines = (await db.all('input_line')).where((l) => l['log_id'] == log['id']).toList()
-        ..sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String));
+    final all = await db.all('input_line');
+    final names = {for (final p in await db.all('payee')) p['id']: p['name'] as String};
+    List<Rec> linesOf(Rec log) => all.where((l) => l['log_id'] == log['id']).toList()
+      ..sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String));
+    for (var i = 0; i < logs.length; i++) {
+      final lines = linesOf(logs[i]);
       if (lines.isEmpty) continue;
-      final names = {for (final p in await db.all('payee')) p['id']: p['name'] as String};
-      for (final l in lines) {
-        await addLine(siteId: siteId, workDate: workDate, kind: l['kind'] as String,
-            item: l['item'] as String, spec: (l['spec'] ?? '') as String, qty: l['qty'] as String,
-            unit: l['unit'] as String, unitPrice: l['unit_price'] as int,
-            payee: names[l['payee_id']] ?? '미지정', workTypeId: l['work_type_id'] as String?);
+      // 그 전 작업일(투입이 있는 날)
+      List<Rec> before = const [];
+      for (var j = i + 1; j < logs.length; j++) {
+        final b = linesOf(logs[j]);
+        if (b.isNotEmpty) {
+          before = b;
+          break;
+        }
       }
-      return lines.length;
+      bool recurring(Rec l) => before.isEmpty ||
+          before.any((b) => b['kind'] == l['kind'] && b['item'] == l['item'] && b['payee_id'] == l['payee_id']);
+      return (
+        from: logs[i]['work_date'] as String,
+        items: [
+          for (final l in lines)
+            (
+              line: l,
+              payee: names[l['payee_id']] ?? '미지정',
+              pick: l['kind'] == '인력' || (l['kind'] == '장비' && recurring(l)),
+            ),
+        ],
+      );
     }
-    return 0;
+    return (from: null, items: <({Rec line, String payee, bool pick})>[]);
+  }
+
+  /// 고른 줄만 작업일로 복사한다.
+  Future<int> copyLines(String siteId, String workDate, List<({Rec line, String payee, bool pick})> items,
+      {String? reason}) async {
+    var n = 0;
+    for (final c in items.where((c) => c.pick)) {
+      final l = c.line;
+      await addLine(siteId: siteId, workDate: workDate, kind: l['kind'] as String,
+          item: l['item'] as String, spec: (l['spec'] ?? '') as String, qty: l['qty'] as String,
+          unit: l['unit'] as String, unitPrice: l['unit_price'] as int, payee: c.payee,
+          workTypeId: l['work_type_id'] as String?, reason: reason);
+      n++;
+    }
+    return n;
+  }
+
+  /// 예전 이름 유지(기본 선택만 복사).
+  Future<int> copyLastDay(String siteId, String workDate) async {
+    final c = await copyCandidates(siteId, workDate);
+    return copyLines(siteId, workDate, c.items);
+  }
+
+  /// 겹침 확인: 같은 사람이 하루 1공수를 넘거나, 같은 업체 같은 장비가 하루 1일을 넘으면 알린다(막지는 않음).
+  /// 하루 두세 현장을 뛰는 날 0.5 + 0.5 로 나눠야 할 것을 1 + 1 로 넣는 실수를 잡는다.
+  Future<String?> overbook(String workDate, String kind, String item, String payee, Object qty,
+      {String? excludeLineId}) async {
+    if (kind != '인력' && kind != '장비') return null;
+    final q = num.tryParse(qty.toString().trim());
+    if (q == null) return null;
+    String? payeeId;
+    for (final p in await db.all('payee')) {
+      if (_norm(p['name'] as String) == _norm(payee)) payeeId = p['id'] as String;
+    }
+    if (payeeId == null) return null;
+    final logs = {for (final l in await db.all('work_log')) if (l['work_date'] == workDate) l['id']: l['site_id']};
+    final sites = {for (final s in await db.all('site')) s['id']: s['name'] as String};
+    num used = 0;
+    final where = <String, num>{};
+    for (final l in await db.all('input_line')) {
+      if (!logs.containsKey(l['log_id']) || l['payee_id'] != payeeId || l['id'] == excludeLineId) continue;
+      if (l['kind'] != kind) continue;
+      if (kind == '장비' && (l['item'] != item || l['unit'] != '일')) continue;
+      final v = num.parse(l['qty'] as String);
+      used += v;
+      final n = sites[logs[l['log_id']]] ?? '';
+      where[n] = (where[n] ?? 0) + v;
+    }
+    final total = used + q;
+    if (used == 0 || total <= 1) return null;
+    final unitWord = kind == '인력' ? '공수' : '일';
+    final w = where.entries.map((e) => '${e.key} ${fmtQty(e.value)}$unitWord').join(', ');
+    return '$payee ${kind == '장비' ? '$item ' : ''}$workDate 에 이미 $w → 이번까지 하루 ${fmtQty(total)}$unitWord입니다. '
+        '두 현장을 나눠 뛰었으면 0.5씩 넣으세요.${kind == '장비' ? ' (장비 2대면 그대로 저장)' : ''}';
   }
 
   // ---------- 월 결제·월 집계 ----------
@@ -281,10 +363,13 @@ extension Ledger on Store {
     for (final log in await db.all('work_log')) {
       if (!(log['work_date'] as String).startsWith(month)) continue;
       final id = log['site_id'] as String;
-      out.putIfAbsent(id, () => SiteTotal(id, sites[id] ?? '(지워진 현장)')).days.add(log['work_date'] as String);
+      final st = out.putIfAbsent(id, () => SiteTotal(id, sites[id] ?? '(지워진 현장)'));
+      st.days.add(log['work_date'] as String);
+      if (log['no_work'] == 1) st.restDays.add(log['work_date'] as String);
     }
     for (final l in await _monthLines(month)) {
       final s = out[l['site_id']]!;
+      s.inputDays.add(l['work_date'] as String);
       final q = num.parse(l['qty'] as String);
       s.byKind[l['kind'] as String] = s.byKind[l['kind']]! + (l['amount'] as int);
       if (l['kind'] == '인력') s.manDays += q;
@@ -328,7 +413,7 @@ extension Ledger on Store {
     b.writeln();
     b.writeln('[현장별]');
     for (final s in sites) {
-      b.writeln('■ ${s.name}  ${w(s.total)}원 (일지 ${s.days.length}일)');
+      b.writeln('■ ${s.name}  ${w(s.total)}원 (작업 ${s.workDays}일${s.restDays.isEmpty ? '' : ' · 쉼 ${s.restDays.length}일'})');
       b.writeln('  인력 ${fmtQty(s.manDays)}공수 ${w(s.byKind['인력']!)} / 장비 ${fmtQty(s.equipDays)}일 ${w(s.byKind['장비']!)}'
           ' / 자재 ${w(s.byKind['자재']!)} / 외주 ${w(s.byKind['외주']!)}');
     }

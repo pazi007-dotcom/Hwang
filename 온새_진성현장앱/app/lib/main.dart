@@ -260,8 +260,12 @@ Widget bigNumber(BuildContext context, String label, String value, String unit, 
       ],
     );
 
-void showMessage(BuildContext context, String text) =>
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+/// 알림은 2.5초만, 이전 알림은 바로 치운다 (저장 단추를 오래 가리지 않게).
+void showMessage(BuildContext context, String text) {
+  final m = ScaffoldMessenger.of(context);
+  m.hideCurrentSnackBar();
+  m.showSnackBar(SnackBar(content: Text(text), duration: const Duration(milliseconds: 2500)));
+}
 
 Future<String?> askText(BuildContext context, String title, String label, {String initial = ''}) {
   final c = TextEditingController(text: initial);
@@ -561,6 +565,8 @@ class _LogPageState extends State<LogPage> {
         a = staText(x);
         b = staText(y);
       }
+      final warn = await s.overbook(workDate, kind, item.text.trim(), payee.text.trim(), qty.text);
+      if (warn != null && !await _confirm('하루 겹침 확인', warn)) return;
       await s.addLine(siteId: widget.siteId, workDate: workDate, kind: kind, item: item.text,
           spec: spec.text, qty: qty.text, unit: unit.text, unitPrice: price.text, payee: payee.text,
           note: note.text, workTypeId: workTypeId, staFrom: a, staTo: b,
@@ -584,12 +590,65 @@ class _LogPageState extends State<LogPage> {
     }
   }
 
+  Future<bool> _confirm(String title, String text) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: Text(text),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('고치기')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('그대로 저장')),
+          ],
+        ),
+      ) ??
+      false;
+
+  /// 어제와 같이: 이전 일지의 줄을 보여 주고 고른 것만 복사한다(자재·외주·가끔 쓴 장비는 기본으로 꺼짐).
   Future<void> _copyLast() async {
+    final c = await s.copyCandidates(widget.siteId!, workDate);
+    if (!mounted) return;
+    if (c.items.isEmpty) return showMessage(context, '복사할 이전 일지가 없습니다.');
+    var items = [...c.items];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text('${c.from} → $workDate 복사'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(shrinkWrap: true, children: [
+              Text('자재·외주·가끔 쓴 장비는 꺼 두었습니다. 오늘 쓴 것만 켜세요.', style: Theme.of(ctx).textTheme.bodySmall),
+              for (var i = 0; i < items.length; i++)
+                CheckboxListTile(
+                  key: ValueKey('copy_$i'),
+                  contentPadding: EdgeInsets.zero,
+                  value: items[i].pick,
+                  onChanged: (v) => setD(() => items[i] = (line: items[i].line, payee: items[i].payee, pick: v ?? false)),
+                  title: Text('${items[i].line['item']} ${items[i].line['qty']}${items[i].line['unit']} · ${items[i].payee}'),
+                  subtitle: Text('${items[i].line['kind']} · ${wonText(items[i].line['amount'] as int)}원'),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('고른 줄 복사')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
     try {
-      final n = await s.copyLastDay(widget.siteId!, workDate);
+      final warns = <String>[];
+      for (final x in items.where((x) => x.pick)) {
+        final w = await s.overbook(workDate, x.line['kind'] as String, x.line['item'] as String, x.payee, x.line['qty']!);
+        if (w != null) warns.add(w);
+      }
+      if (warns.isNotEmpty && !await _confirm('하루 겹침 확인', warns.join('\n\n'))) return;
+      final n = await s.copyLines(widget.siteId!, workDate, items);
       setState(() => refresh++);
       await widget.onChanged();
-      if (mounted) showMessage(context, n == 0 ? '복사할 이전 일지가 없습니다.' : '이전 일지의 $n줄을 $workDate 로 복사했습니다. 다른 것만 고치세요.');
+      if (mounted) showMessage(context, '$n줄을 $workDate 로 복사했습니다. 다른 것만 고치세요.');
     } on StoreError catch (e) {
       if (mounted) showMessage(context, e.message);
     }
@@ -1025,7 +1084,7 @@ class _PayPageState extends State<PayPage> {
                     Expanded(child: Text(x.name, style: const TextStyle(fontWeight: FontWeight.w700))),
                     Text('${wonText(x.total)}원', style: const TextStyle(fontWeight: FontWeight.w700)),
                   ]),
-                  Text('일지 ${x.days.length}일 · 인력 ${fmtQty(x.manDays)}공수 · 장비 ${fmtQty(x.equipDays)}일',
+                  Text('작업 ${x.workDays}일${x.restDays.isEmpty ? '' : ' · 쉼 ${x.restDays.length}일'} · 인력 ${fmtQty(x.manDays)}공수 · 장비 ${fmtQty(x.equipDays)}일',
                       style: Theme.of(context).textTheme.bodySmall),
                   Wrap(spacing: 12, children: [
                     for (final k in kinds) Text('$k ${wonText(x.byKind[k]!)}', style: Theme.of(context).textTheme.bodySmall),
