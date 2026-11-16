@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'ledger.dart';
+import 'roster.dart';
+import 'roster_page.dart';
 import 'row_db.dart';
 import 'sqlite_db.dart';
 import 'stations.dart';
@@ -58,7 +60,7 @@ class _ShellState extends State<Shell> {
   List<Rec> sites = [];
   int version = 0; // 자료가 바뀌면 올려서 화면을 다시 그린다
 
-  static const titles = ['오늘 현장 보기', '오늘 일지 쓰기', '결제·한 달 집계', '집 PC와 맞추기'];
+  static const titles = ['오늘 현장 보기', '오늘 일지 쓰기', '결제·한 달 집계', '작업자·장비 명부', '집 PC와 맞추기'];
 
   @override
   void initState() {
@@ -139,6 +141,7 @@ class _ShellState extends State<Shell> {
       LogPage(key: ValueKey('l$siteId'), store: widget.store, siteId: siteId, tokens: t,
           onChanged: reload),
       PayPage(key: ValueKey('p$version'), store: widget.store, tokens: t, onChanged: reload),
+      RosterPage(key: ValueKey('r$version'), store: widget.store, tokens: t, onChanged: reload),
       SyncPage(key: ValueKey('s$version'), store: widget.store, tokens: t, onChanged: reload),
     ];
     return Scaffold(
@@ -188,6 +191,7 @@ class _ShellState extends State<Shell> {
           NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
           NavigationDestination(icon: Icon(Icons.edit_note_outlined), label: '일지'),
           NavigationDestination(icon: Icon(Icons.payments_outlined), label: '결제'),
+          NavigationDestination(icon: Icon(Icons.badge_outlined), label: '명부'),
           NavigationDestination(icon: Icon(Icons.sync_outlined), label: '동기화'),
         ],
       ),
@@ -620,6 +624,76 @@ class _LogPageState extends State<LogPage> {
       ) ??
       false;
 
+  /// 명부에서 고르기: 체크한 사람·장비를 한 번에 넣는다(수량 기본 1, 반나절은 0.5로).
+  Future<void> _pickRoster() async {
+    final list = await s.roster();
+    if (!mounted) return;
+    if (list.isEmpty) return showMessage(context, '명부가 비어 있습니다. 명부 탭에서 등록하거나 아래에서 직접 한 줄 넣으세요.');
+    final picked = <String, TextEditingController>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text('$workDate 나온 사람·장비'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(shrinkWrap: true, children: [
+              for (final k in kinds)
+                if (list.any((r) => r.kind == k)) ...[
+                  Padding(padding: const EdgeInsets.only(top: 8), child: Text(k, style: Theme.of(ctx).textTheme.bodySmall)),
+                  for (final r in list.where((r) => r.kind == k))
+                    Row(children: [
+                      Checkbox(
+                        key: ValueKey('pick_${r.label}'),
+                        value: picked.containsKey(r.id),
+                        onChanged: (v) => setD(() => v == true
+                            ? picked[r.id] = TextEditingController(text: '1')
+                            : picked.remove(r.id)),
+                      ),
+                      Expanded(child: Text('${r.label}\n${wonText(r.price)}원/${r.unit}')),
+                      if (picked.containsKey(r.id))
+                        SizedBox(
+                          width: 64,
+                          child: TextField(
+                            key: ValueKey('pickq_${r.label}'),
+                            controller: picked[r.id],
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(labelText: r.unit),
+                          ),
+                        ),
+                    ]),
+                ],
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('고른 것 넣기')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || picked.isEmpty) return;
+    try {
+      final byId = {for (final r in list) r.id: r};
+      final warns = <String>[];
+      for (final e in picked.entries) {
+        final r = byId[e.key]!;
+        final w = await s.overbook(workDate, r.kind, r.item, r.payeeName, e.value.text);
+        if (w != null) warns.add(w);
+      }
+      if (warns.isNotEmpty && !await _confirm('하루 겹침 확인', warns.join('\n\n'))) return;
+      final reason = await _reasonIfLocked();
+      if (reason == null) return;
+      final n = await s.addFromRoster(widget.siteId!, workDate, [for (final e in picked.entries) (e.key, e.value.text)],
+          reason: reason.isEmpty ? null : reason);
+      setState(() => refresh++);
+      await widget.onChanged();
+      if (mounted) showMessage(context, '$n줄을 넣었습니다.');
+    } on StoreError catch (e) {
+      if (mounted) showMessage(context, e.message);
+    }
+  }
+
   /// 어제와 같이: 이전 일지의 줄을 보여 주고 고른 것만 복사한다(자재·외주·가끔 쓴 장비는 기본으로 꺼짐).
   Future<void> _copyLast() async {
     final c = await s.copyCandidates(widget.siteId!, workDate);
@@ -785,7 +859,13 @@ class _LogPageState extends State<LogPage> {
               Padding(padding: const EdgeInsets.only(top: 8), child: Text(log!['note'] as String, style: Theme.of(context).textTheme.bodySmall)),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '2. 투입 한 줄 넣기', children: [
+          Section(title: '2. 명부에서 고르기 (체크만)', children: [
+            OutlinedButton(key: const ValueKey('f_roster'), onPressed: _pickRoster, child: const Text('오늘 나온 사람·장비 고르기')),
+            Text('미리 등록한(또는 전에 적은) 사람·장비를 체크하면 단가·단위까지 한 번에 들어갑니다.',
+                style: Theme.of(context).textTheme.bodySmall),
+          ]),
+          const SizedBox(height: Tokens.gap),
+          Section(title: '3. 직접 한 줄 넣기', children: [
             SegmentedButton<String>(
               showSelectedIcon: false,
               segments: [for (final k in kinds) ButtonSegment(value: k, label: Text(k))],
@@ -866,7 +946,7 @@ class _LogPageState extends State<LogPage> {
             FilledButton(key: const ValueKey('f_save'), onPressed: _save, child: const Text('저장')),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '3. $workDate 투입 ${lines.length}줄 · ${wonText(total)}원', children: [
+          Section(title: '4. $workDate 투입 ${lines.length}줄 · ${wonText(total)}원', children: [
             if (lines.isEmpty) Text('아직 입력한 줄이 없습니다.', style: Theme.of(context).textTheme.bodySmall),
             if (lines.isNotEmpty)
               Wrap(spacing: 12, runSpacing: 4, children: [
@@ -898,7 +978,7 @@ class _LogPageState extends State<LogPage> {
             if (lines.isNotEmpty) Text('줄을 누르면 고치거나 지울 수 있습니다.', style: Theme.of(context).textTheme.bodySmall),
           ]),
           const SizedBox(height: Tokens.gap),
-          Section(title: '4. 작업 내용 (보고서·사진대지에 쓰임)', children: [
+          Section(title: '5. 작업 내용 (보고서·사진대지에 쓰임)', children: [
             TextField(controller: content, maxLines: 3, decoration: const InputDecoration(labelText: '오늘 한 일')),
             const SizedBox(height: 8),
             Row2(children: [
@@ -992,8 +1072,13 @@ class _PayPageState extends State<PayPage> {
   int refresh = 0;
   Store get s => widget.store;
 
-  Future<Map<String, dynamic>> _load() async =>
-      {'pay': await s.monthPayments(month), 'sites': await s.monthSites(month), 'locked': await s.isLocked(month)};
+  Future<Map<String, dynamic>> _load() async => {
+        'pay': await s.monthPayments(month),
+        'sites': await s.monthSites(month),
+        'locked': await s.isLocked(month),
+        'year': await s.yearByPayee(month.substring(0, 4)),
+        'yearSites': await s.yearBySite(month.substring(0, 4)),
+      };
 
   Future<void> _detail(PayeeTotal p) async {
     final lines = await s.linesOfPayee(p.payeeId, month);
@@ -1052,6 +1137,9 @@ class _PayPageState extends State<PayPage> {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final pay = snap.data!['pay'] as List<PayeeTotal>;
         final sites = snap.data!['sites'] as List<SiteTotal>;
+        final year = snap.data!['year'] as List<YearRow>;
+        final yearSites = snap.data!['yearSites'] as List<YearRow>;
+        final yy = month.substring(0, 4);
         final total = pay.fold<int>(0, (a, p) => a + p.total);
         final due = pay.fold<int>(0, (a, p) => a + p.balance);
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
@@ -1134,6 +1222,38 @@ class _PayPageState extends State<PayPage> {
               ),
               const Divider(height: 1),
             ],
+          ]),
+          const SizedBox(height: Tokens.gap),
+          Section(title: '$yy년 누계 (사람·장비별, 1월~)', children: [
+            if (year.isEmpty) Text('올해 투입이 없습니다.', style: Theme.of(context).textTheme.bodySmall),
+            for (final y in year)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text('${y.name} · ${y.detail.split(' ').skip(1).join(' ')}', style: const TextStyle(fontWeight: FontWeight.w700))),
+                    Text('${wonText(y.amountTotal)}원', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ]),
+                  Text('${fmtQty(y.qtyTotal)}${y.unit == '인' ? '공수' : y.unit} · '
+                      '${[for (var m = 1; m <= 12; m++) if (y.qty[m] != null) '$m월 ${fmtQty(y.qty[m]!)}'].join(' / ')}',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ]),
+              ),
+          ]),
+          const SizedBox(height: Tokens.gap),
+          Section(title: '$yy년 누계 (현장별)', children: [
+            for (final y in yearSites)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(y.name, style: const TextStyle(fontWeight: FontWeight.w700))),
+                    Text('${wonText(y.amountTotal)}원', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ]),
+                  Text([for (var m = 1; m <= 12; m++) if (y.amount[m] != null) '$m월 ${wonText(y.amount[m]!)}'].join(' / '),
+                      style: Theme.of(context).textTheme.bodySmall),
+                ]),
+              ),
           ]),
         ]);
       },

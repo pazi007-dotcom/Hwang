@@ -6,6 +6,7 @@
 /// - 값의 주인은 업무일지 한 줄. 결제·집계는 그 줄을 더할 뿐이다(따로 입력하는 숫자 없음).
 library;
 
+import 'roster.dart';
 import 'row_db.dart';
 import 'store.dart';
 
@@ -96,6 +97,7 @@ extension Ledger on Store {
         'valid_from': wd, 'is_draft': 0,
       });
     }
+    await learnRoster(kind, payeeId, it, sp, u, price);
     return insert('input_line', {
       'log_id': logId, 'kind': kind, 'item': it, 'spec': sp, 'qty': q, 'unit': u,
       'unit_price': price, 'amount': won(q, price), 'payee_id': payeeId,

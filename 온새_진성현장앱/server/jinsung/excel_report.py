@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -261,6 +262,36 @@ def build_monthly(store: Store, month: str, out_dir: str | Path, corrected: bool
         r += 1
     _page(ws)
 
+    # ---------- 출역표: 사람·장비 1줄 × 1~31일 (공수·일수), 결제 근거 ----------
+    ws = wb.create_sheet("출역표", 2)
+    last_day = int(end[-2:])
+    _c(ws, 1, 1, f"{month} 출역표 (사람·장비별 날짜별 수량, 두 현장 이상인 날은 합계)", bold=True, size=13, border=False)
+    head = ["받는 곳", "항목", "단위", *[str(d) for d in range(1, last_day + 1)], "합계", "일수", "금액"]
+    _header(ws, 3, head, [16, 12, 5, *([4.2] * last_day), 7, 5, 13])
+    grid: dict[tuple, dict] = {}
+    for kind in KINDS:
+        if kind in ("자재",):
+            continue
+        for ln in reports.daily_lines(store, month, kind):
+            key = (ln["payee_name"], ln["item"], ln["unit"])
+            g = grid.setdefault(key, {"days": defaultdict(float), "amount": 0})
+            g["days"][int(ln["work_date"][-2:])] += float(ln["qty"])
+            g["amount"] += ln["amount"]
+    r = 4
+    for (payee, item, unit), g in sorted(grid.items(), key=lambda kv: (-kv[1]["amount"], kv[0])):
+        _c(ws, r, 1, payee)
+        _c(ws, r, 2, item)
+        _c(ws, r, 3, unit, align="center")
+        for d in range(1, last_day + 1):
+            v = g["days"].get(d)
+            _c(ws, r, 3 + d, v if v else None, fmt="0.##", align="center")
+        a, z = CL(4), CL(3 + last_day)
+        _c(ws, r, 4 + last_day, f"=SUM({a}{r}:{z}{r})", fmt="0.##", bold=True, align="center")
+        _c(ws, r, 5 + last_day, f"=COUNT({a}{r}:{z}{r})", align="center")
+        _c(ws, r, 6 + last_day, g["amount"], fmt=WON)
+        r += 1
+    _page(ws)
+
     # ---------- 자재배정대비: 현장·품목 1건 = 한 줄 ----------
     ws = wb.create_sheet("자재배정대비")
     _c(ws, 1, 1, "내역 배정 자재 대비 (누계 기준)", bold=True, size=13, border=False)
@@ -288,5 +319,68 @@ def build_monthly(store: Store, month: str, out_dir: str | Path, corrected: bool
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / report_file_name("월말보고", month, corrected=corrected)
+    wb.save(path)
+    return path
+
+
+def build_yearly(store: Store, year: str, out_dir: str | Path) -> Path:
+    """연말 보고: 사람·장비별 월별(수량·금액), 현장별 월별 금액. 파일명 연말보고_2026.xlsx"""
+    wb = Workbook()
+    wb.remove(wb.active)
+    rows = store.db.execute(
+        "SELECT l.*, w.work_date, s.name AS site_name, p.name AS payee_name FROM input_line l"
+        " JOIN work_log w ON w.id=l.log_id JOIN site s ON s.id=w.site_id JOIN payee p ON p.id=l.payee_id"
+        " WHERE substr(w.work_date,1,4)=?", (year,)).fetchall()
+    months = [f"{m}월" for m in range(1, 13)]
+
+    ws = wb.create_sheet("사람장비별")
+    _c(ws, 1, 1, f"{year}년 사람·장비별 집계 (위 줄 수량, 아래 줄 금액)", bold=True, size=13, border=False)
+    _header(ws, 3, ["받는 곳", "구분", "항목", "단위", "", *months, "합계"], [16, 6, 12, 5, 5, *([11] * 12), 13])
+    agg: dict[tuple, dict] = {}
+    for ln in rows:
+        key = (ln["payee_name"], ln["kind"], ln["item"], ln["unit"])
+        g = agg.setdefault(key, {"q": defaultdict(float), "a": defaultdict(int)})
+        m = int(ln["work_date"][5:7])
+        g["q"][m] += float(ln["qty"])
+        g["a"][m] += ln["amount"]
+    r = 4
+    for (payee, kind, item, unit), g in sorted(agg.items(), key=lambda kv: -sum(kv[1]["a"].values())):
+        for i, (lab, src, fmt) in enumerate((("수량", g["q"], "0.##"), ("금액", g["a"], WON))):
+            _c(ws, r, 1, payee if i == 0 else None, bold=i == 0)
+            _c(ws, r, 2, kind if i == 0 else None)
+            _c(ws, r, 3, item if i == 0 else None)
+            _c(ws, r, 4, unit if i == 0 else "원", align="center")
+            _c(ws, r, 5, lab, align="center")
+            for m in range(1, 13):
+                _c(ws, r, 5 + m, src.get(m) or None, fmt=fmt)
+            _c(ws, r, 18, f"=SUM({CL(6)}{r}:{CL(17)}{r})", fmt=fmt, bold=True)
+            r += 1
+    _c(ws, r, 1, "금액 합계", bold=True)
+    for m in range(1, 14):
+        col = 5 + m
+        _c(ws, r, col, f'=SUMIF($E$4:$E${r - 1},"금액",{CL(col)}4:{CL(col)}{r - 1})', fmt=WON, bold=True)
+    _page(ws)
+
+    ws = wb.create_sheet("현장별")
+    _c(ws, 1, 1, f"{year}년 현장별 월별 투입", bold=True, size=13, border=False)
+    _header(ws, 3, ["현장", *months, "합계"], [24, *([12] * 12), 14])
+    site: dict[str, dict] = {}
+    for ln in rows:
+        site.setdefault(ln["site_name"], defaultdict(int))[int(ln["work_date"][5:7])] += ln["amount"]
+    r = 4
+    for name, g in sorted(site.items(), key=lambda kv: -sum(kv[1].values())):
+        _c(ws, r, 1, name)
+        for m in range(1, 13):
+            _c(ws, r, 1 + m, g.get(m) or None, fmt=WON)
+        _c(ws, r, 14, f"=SUM(B{r}:M{r})", fmt=WON, bold=True)
+        r += 1
+    _c(ws, r, 1, "합계", bold=True)
+    for col in range(2, 15):
+        _c(ws, r, col, f"=SUM({CL(col)}4:{CL(col)}{r - 1})", fmt=WON, bold=True)
+    _page(ws)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / report_file_name("연말보고", year)
     wb.save(path)
     return path

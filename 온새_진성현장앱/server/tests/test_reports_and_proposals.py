@@ -47,7 +47,7 @@ def test_monthly_excel_sheets_and_formulas(world, tmp_path):
     path = excel_report.build_monthly(s, "2026-11", tmp_path)
     assert path.name == "월말보고_2026-11.xlsx"
     wb = load_workbook(path)
-    assert wb.sheetnames == ["결제요약", "현장별투입", "인력", "장비", "자재", "거래명세서", "자재배정대비"]
+    assert wb.sheetnames == ["결제요약", "현장별투입", "출역표", "인력", "장비", "자재", "거래명세서", "자재배정대비"]
     ws = wb["결제요약"]
     assert [c.value for c in ws[5]][:5] == ["받는 곳", "구분", "요성리 용배수로", "점촌 긴급복구", "합계"]
     assert ws["A6"].value == "대성중기" and ws["A6"].font.bold            # 금액 큰 순 + 차이는 굵게
@@ -262,3 +262,24 @@ def test_backup_three_places_one_missing(world, tmp_path):
     for day in range(16, 20):
         backup.backup(world["s"], [a], f"2026-11-{day}", keep=3)
     assert len(list(a.glob("*.db"))) == 3
+
+
+def test_attendance_sheet_and_yearly_report(world, tmp_path):
+    fill_november(world)
+    s = world["s"]
+    s.add_input(world["site"], "2026-10-20", "인력", "보통인부", 1, world["kim"])
+    wb = load_workbook(excel_report.build_monthly(s, "2026-11", tmp_path))
+    ws = wb["출역표"]
+    head = [c.value for c in ws[3]]
+    rows = {(r[0], r[1]): r for r in ws.iter_rows(min_row=4, values_only=True) if r[0]}
+    kim = rows[("김반장", "보통인부")]
+    assert kim[head.index("13")] == 4 and kim[head.index("일수")].startswith("=COUNT(")
+    dump = rows[("대성중기", "6W")]
+    assert dump[head.index("13")] == 1          # 두 현장 0.5 + 0.5 = 1
+    path = excel_report.build_yearly(s, "2026", tmp_path)
+    assert path.name == "연말보고_2026.xlsx"
+    y = load_workbook(path)
+    assert y.sheetnames == ["사람장비별", "현장별"]
+    vals = {(r[0], r[4]): r for r in y["사람장비별"].iter_rows(min_row=4, values_only=True) if r[0]}
+    q = vals[("김반장", "수량")]
+    assert (q[4 + 10], q[4 + 11]) == (1, 4)     # 10월 1공수, 11월 4공수 (F열=1월)

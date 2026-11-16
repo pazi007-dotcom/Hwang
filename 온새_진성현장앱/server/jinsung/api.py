@@ -207,10 +207,11 @@ def make_handler(app: App, token: str | None):
                 return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
             if not self._allowed():
                 return self._send(401, _json({"error": "허용되지 않은 기기입니다."}))
-            if url.path == "/api/report/monthly":
+            if url.path in ("/api/report/monthly", "/api/report/yearly"):
                 try:
                     with app.lock:
-                        path = app.monthly_file(**args)
+                        path = (app.monthly_file(**args) if url.path.endswith("monthly")
+                                else excel_report.build_yearly(app.store, args["year"], app.out_dir))
                 except (StoreError, ValueError, KeyError) as exc:
                     return self._send(400, _json({"error": str(exc)}))
                 from urllib.parse import quote

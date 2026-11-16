@@ -394,3 +394,20 @@ CREATE TABLE IF NOT EXISTS site_task (
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_task_due ON site_task(done, due_date);
+
+-- 명부: 작업자·장비 미리 등록 (받는 곳 + 직종·기종 + 단위·단가). 일지에 처음 적으면 자동으로 들어온다.
+CREATE TABLE IF NOT EXISTS roster (
+    id          TEXT PRIMARY KEY,
+    payee_id    TEXT NOT NULL REFERENCES payee(id),
+    kind        TEXT NOT NULL CHECK (kind IN ('인력','장비','자재','외주')),
+    item        TEXT NOT NULL,
+    spec        TEXT NOT NULL DEFAULT '',
+    unit        TEXT NOT NULL,
+    unit_price  INTEGER NOT NULL,
+    phone       TEXT,
+    memo        TEXT,             -- 계좌, 차량번호 등
+    active      INTEGER NOT NULL DEFAULT 1,
+    version     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);

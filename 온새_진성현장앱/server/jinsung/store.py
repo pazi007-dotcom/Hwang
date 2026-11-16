@@ -23,7 +23,7 @@ KINDS = ("인력", "장비", "자재", "외주")
 # 동기화하는 테이블 (기기끼리 주고받는 기록). 이력·충돌·보낼 함은 기기별로 둔다.
 SYNCED = ("site", "payee", "rate", "work_type", "station", "work_log", "input_line",
           "progress", "allocation", "invoice", "photo", "level_run", "level_reading",
-          "payment", "market_price", "approval", "report_log", "contact", "attachment", "site_task")
+          "payment", "market_price", "approval", "report_log", "contact", "attachment", "site_task", "roster")
 
 
 class StoreError(Exception):
