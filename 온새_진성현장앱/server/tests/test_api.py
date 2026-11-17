@@ -114,7 +114,8 @@ def test_phone_proceed_with_start_date_gets_schedule_back(live):
     sync.pull(phone, fetch)
     rows = phone.db.execute("SELECT title, due_date FROM site_task WHERE site_id=? AND source='온새 제안'"
                             " ORDER BY due_date", (site["id"],)).fetchall()
-    assert len(rows) == 6 and before == len(intake.FIRST_CHECKS[site["job_type"]])
+    assert len(rows) == 5 and before == len(intake.FIRST_CHECKS[site["job_type"]])   # 사진(전)은 접수 체크리스트와 겹쳐서 안 만듦
+    assert not any("사진(전)" in r["title"] for r in rows)
     assert (rows[0]["title"], rows[0]["due_date"]) == ("작업 인원·직종 확정, 전날 재확인", "2026-11-17")
 
 

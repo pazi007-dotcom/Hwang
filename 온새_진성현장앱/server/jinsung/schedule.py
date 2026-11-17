@@ -93,9 +93,13 @@ def plan(store: Store, site_id: str) -> list[str]:
            for w in store.db.execute("SELECT * FROM work_type WHERE site_id=? AND template_code='9'"
                                      " ORDER BY created_at", (site_id,))]
     rows = channel(wts, start) if wts else generic(store, site_id, start)
+    # 접수 체크리스트에 이미 있는 일(착공 서류, 사진(전))은 같은 일을 또 만들지 않는다
+    own = [r["title"] for r in store.db.execute(
+        "SELECT title FROM site_task WHERE site_id=? AND source!='온새 제안'", (site_id,))]
+    same = lambda t: any(k in t and any(k in o for o in own) for k in ("착공", "사진(전)"))  # noqa: E731
     ids = []
     for kind, title, offset, qty, unit, wt in rows:
-        if title in kept:                       # 이미 끝낸 일은 다시 만들지 않는다
+        if title in kept or same(title):        # 이미 끝낸 일·체크리스트와 같은 일은 다시 만들지 않는다
             continue
         ids.append(intake.add_task(store, site_id, kind, title, due_date=_d(start, offset),
                                    qty=None if qty is None else _q(qty), unit=unit, work_type_id=wt,
