@@ -190,6 +190,7 @@ def make_handler(app: App, token: str | None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")   # 브라우저판 앱(시험·PC 화면)에서도 맞추기
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -207,6 +208,14 @@ def make_handler(app: App, token: str | None):
                 self._send(400, _json({"error": str(exc)}))
             except (KeyError, TypeError) as exc:
                 self._send(400, _json({"error": f"요청 값이 빠졌거나 잘못됐습니다: {exc}"}))
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Jinsung-Token")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_GET(self):
             url = urlparse(self.path)

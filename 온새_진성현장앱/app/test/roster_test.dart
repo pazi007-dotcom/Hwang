@@ -66,4 +66,18 @@ void main() {
     // 월말 결제에도 같은 숫자
     expect((await s.monthPayments('2026-11')).firstWhere((x) => x.name == '김반장').total, 4 * 187000);
   });
+
+  test('관급자재 배정 → 사용·남은량 (명부에서 이 현장 배정량 입력)', () async {
+    final s = Store(MemoryDb(), device: 'phone');
+    final ys = await s.receive('요성리', '공사', '2026-11-02');
+    final rmc = await s.saveRoster(kind: '자재', payee: '가은레미콘', item: '레미콘', spec: '25-21-08', unit: '㎥', unitPrice: 98000);
+    await s.setAllocation(ys, '레미콘', '25-21-08', '㎥', '180', '도급자관급');
+    await s.addFromRoster(ys, '2026-11-06', [(rmc, '5.5')]);
+    await s.addFromRoster(ys, '2026-11-13', [(rmc, '6')]);
+    var a = (await s.allocations(ys))['레미콘|25-21-08']!;
+    expect([a.supply, a.alloc, a.used], ['도급자관급', 180, 11.5]);
+    await s.setAllocation(ys, '레미콘', '25-21-08', '㎥', '170', '도급자관급'); // 고치면 덮어씀
+    a = (await s.allocations(ys))['레미콘|25-21-08']!;
+    expect([(await s.db.all('allocation')).length, a.alloc], [1, 170]);
+  });
 }

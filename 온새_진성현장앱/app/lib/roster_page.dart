@@ -10,8 +10,10 @@ import 'store.dart';
 import 'tokens.dart';
 
 class RosterPage extends StatefulWidget {
-  const RosterPage({super.key, required this.store, required this.tokens, required this.onChanged});
+  const RosterPage({super.key, required this.store, required this.tokens, required this.onChanged, this.siteId, this.siteName});
   final Store store;
+  final String? siteId; // 위쪽에서 고른 현장 (관급 배정은 현장마다)
+  final String? siteName;
   final Tokens tokens;
   final Future<void> Function() onChanged;
   @override
@@ -24,15 +26,20 @@ class _RosterPageState extends State<RosterPage> {
 
   Future<void> _edit([RosterEntry? r]) async {
     final payee = r == null ? null : await s.mustGet('payee', r.row['payee_id'] as String);
+    final alloc = r == null || widget.siteId == null ? null : (await s.allocations(widget.siteId!))['${r.item}|${r.spec}'];
     if (!mounted) return;
     final ok = await showModalBottomSheet<bool>(
-        context: context, isScrollControlled: true, builder: (_) => RosterEditor(entry: r, payee: payee));
+        context: context, isScrollControlled: true,
+        builder: (_) => RosterEditor(entry: r, payee: payee, siteName: widget.siteName, alloc: alloc));
     if (ok != true) return;
     final v = RosterEditor.result!;
     try {
       await s.saveRoster(kind: v['kind']!, payee: v['payee']!, item: v['item']!, unit: v['unit']!,
           unitPrice: v['price']!, spec: v['spec']!, phone: v['phone'], memo: v['memo']);
       final payeeId = await s.ensurePayee(v['payee']!, kind: v['kind']!);
+      if (v['kind'] == '자재' && v['supply'] != '사급' && widget.siteId != null && v['alloc']!.trim().isNotEmpty) {
+        await s.setAllocation(widget.siteId!, v['item']!, v['spec']!, v['unit']!, v['alloc']!, v['supply']!);
+      }
       if (v['bank']!.trim().isNotEmpty || v['account']!.trim().isNotEmpty || r != null) {
         await s.setPayeeInfo(payeeId, bank: v['bank'], account: v['account'], holder: v['holder']);
       }
@@ -44,15 +51,18 @@ class _RosterPageState extends State<RosterPage> {
     }
   }
 
+  Future<(List<RosterEntry>, Map<String, ({String supply, num alloc, num used, String unit})>)> _load() async =>
+      (await s.roster(), widget.siteId == null ? <String, ({String supply, num alloc, num used, String unit})>{} : await s.allocations(widget.siteId!));
+
   @override
   Widget build(BuildContext context) {
     final t = widget.tokens;
-    return FutureBuilder<List<RosterEntry>>(
+    return FutureBuilder<(List<RosterEntry>, Map<String, ({String supply, num alloc, num used, String unit})>)>(
       key: ValueKey('roster$refresh'),
-      future: s.roster(),
+      future: _load(),
       builder: (context, snap) {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final list = snap.data!;
+        final (list, allocs) = snap.data!;
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
           FilledButton(key: const ValueKey('r_add'), onPressed: () => _edit(), child: const Text('+ 작업자·장비 등록')),
           const SizedBox(height: 8),
@@ -78,6 +88,11 @@ class _RosterPageState extends State<RosterPage> {
                             Text('${r.item}${r.spec.isEmpty ? '' : ' ${r.spec}'} · ${wonText(r.price)}원/${r.unit}'
                                 '${r.row['phone'] != null ? ' · ${r.row['phone']}' : ''}',
                                 style: Theme.of(context).textTheme.bodySmall),
+                            if (allocs['${r.item}|${r.spec}'] case final a?)
+                              Text(
+                                  '${a.supply == '관급자관급' ? '관급(발주처 지급)' : '관급(우리가 구매)'} 배정 ${fmtQty(a.alloc)}${a.unit}'
+                                  ' · 사용 ${fmtQty(a.used)} · 남음 ${fmtQty(a.alloc - a.used)}',
+                                  style: TextStyle(color: a.alloc - a.used < 0 ? t.warn : t.sub, fontSize: Tokens.fNote)),
                           ]),
                         ),
                         Icon(Icons.chevron_right, color: t.sub),
@@ -97,9 +112,11 @@ class _RosterPageState extends State<RosterPage> {
 }
 
 class RosterEditor extends StatefulWidget {
-  const RosterEditor({super.key, this.entry, this.payee});
+  const RosterEditor({super.key, this.entry, this.payee, this.siteName, this.alloc});
   final RosterEntry? entry;
   final Map<String, Object?>? payee;
+  final String? siteName;
+  final ({String supply, num alloc, num used, String unit})? alloc;
   static Map<String, String>? result;
   @override
   State<RosterEditor> createState() => _RosterEditorState();
@@ -107,6 +124,8 @@ class RosterEditor extends StatefulWidget {
 
 class _RosterEditorState extends State<RosterEditor> {
   late String kind = widget.entry?.kind ?? '인력';
+  late String supply = widget.alloc?.supply ?? '사급';
+  late final allocQty = TextEditingController(text: widget.alloc == null ? '' : fmtQty(widget.alloc!.alloc));
   late final c = {
     'payee': TextEditingController(text: widget.entry?.payeeName ?? ''),
     'item': TextEditingController(text: widget.entry?.item ?? ''),
@@ -148,6 +167,29 @@ class _RosterEditorState extends State<RosterEditor> {
                     }),
           ),
           for (final k in labels.keys.where((k) => !(kind == '인력' && (k == 'spec' || k == 'unit')) && !(kind == '장비' && k == 'unit'))) ...[
+            if (k == 'price' && kind == '자재') ...[
+              const SizedBox(height: Tokens.gap),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final e in const {'사급': '사급 (우리가 삼)', '관급자관급': '관급 (발주처 지급)', '도급자관급': '관급 (우리가 구매)'}.entries)
+                  ChoiceChip(
+                    key: ValueKey('re_sup_${e.key}'),
+                    label: Text(e.value),
+                    selected: supply == e.key,
+                    onSelected: (_) => setState(() => supply = e.key),
+                  ),
+              ]),
+              if (supply != '사급') ...[
+                const SizedBox(height: Tokens.gap),
+                TextField(
+                  key: const ValueKey('re_alloc'),
+                  controller: allocQty,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                      labelText: '배정량 (${widget.siteName ?? '이 현장'}, 내역서 수량)',
+                      helperText: widget.alloc == null ? null : '지금까지 사용 ${fmtQty(widget.alloc!.used)}${widget.alloc!.unit}'),
+                ),
+              ],
+            ],
             if (k == 'price' && kind == '장비') ...[
               const SizedBox(height: Tokens.gap),
               Wrap(spacing: 8, runSpacing: 8, children: [
@@ -173,7 +215,8 @@ class _RosterEditorState extends State<RosterEditor> {
             key: const ValueKey('re_save'),
             onPressed: () {
               if (kind == '인력') c['unit']!.text = '인'; // 작업자는 단위가 늘 '인'
-              RosterEditor.result = {'kind': kind, for (final e in c.entries) e.key: e.value.text};
+              RosterEditor.result = {'kind': kind, 'supply': supply, 'alloc': allocQty.text,
+                for (final e in c.entries) e.key: e.value.text};
               Navigator.pop(context, true);
             },
             child: const Text('저장'),

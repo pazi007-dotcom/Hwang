@@ -12,6 +12,14 @@ import 'store.dart';
 
 const defaultUnit = {'인력': '인', '장비': '일', '자재': '㎥', '외주': '식'};
 
+/// 사람 한 명의 한 줄은 하루 2공수를 넘을 수 없다 (10.5처럼 잘못 친 숫자를 막는다. 팀이면 사람마다 따로).
+void _checkQty(String kind, String q) {
+  final v = num.tryParse(q) ?? 0;
+  if (kind == '인력' && v > 2) {
+    throw StoreError('한 사람 하루 $q공수는 너무 많습니다. 수량을 확인해 주세요 (반일 0.5, 하루 1).');
+  }
+}
+
 String _norm(String s) => s.replaceAll(RegExp(r'\s+|\(주\)|주식회사|㈜'), '');
 
 class PayeeTotal {
@@ -84,6 +92,7 @@ extension Ledger on Store {
     final price = raw.isEmpty && kind == '자재' ? 0 : int.tryParse(raw);
     if (price == null || price < 0) throw StoreError('단가를 숫자로 적어 주세요. (자재는 비워도 됩니다)');
     final q = cleanQty(qty);
+    _checkQty(kind, q);
     final logId = await logFor(siteId, workDate, reason: reason);
     final wd = (await mustGet('work_log', logId))['work_date'] as String;
     final payeeId = await ensurePayee(payee, kind: kind);
@@ -113,7 +122,10 @@ extension Ledger on Store {
       String? spec, String? unit, String? note, String? reason}) async {
     final row = await mustGet('input_line', lineId);
     final ch = <String, dynamic>{};
-    if (qty != null) ch['qty'] = cleanQty(qty);
+    if (qty != null) {
+      ch['qty'] = cleanQty(qty);
+      _checkQty(row['kind'] as String, ch['qty'] as String);
+    }
     if (unitPrice != null) {
       final p = int.tryParse(unitPrice.toString().replaceAll(',', '').trim());
       if (p == null || p < 0) throw StoreError('단가를 숫자로 적어 주세요.');

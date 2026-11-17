@@ -94,7 +94,7 @@ void main() {
       final log = (await p.phone.db.all('work_log')).single;
       expect(log['note'], '[접수·긴급] 점촌 긴급복구 — 준설 30m');
       expect(log['content'], isNull); // 작업 내용 칸은 소장 몫
-      expect((await p.phone.db.all('site_task')).length, 4);
+      expect((await p.phone.db.all('site_task')).length, 2); // 긴급은 두 가지만
       expect((await p.phone.dueTasks('2026-11-17', siteId: e)).first['when'], '1일 지남');
       await sync(p.phone, p.pc);
       expect((await p.pc.db.all('contact')).single['name'], '김주무관');
@@ -124,7 +124,7 @@ void main() {
       final e = await p.phone.receive('긴급 B', '긴급', '2026-11-16');
       final first = (await p.phone.dueTasks('2026-11-16', siteId: e)).first;
       await p.phone.checkTask(first['id'] as String, '2026-11-16');
-      expect((await p.phone.dueTasks('2026-11-16', siteId: e)).length, 3);
+      expect((await p.phone.dueTasks('2026-11-16', siteId: e)).length, 1);
     });
   });
 
@@ -198,5 +198,16 @@ void main() {
     expect((await s.db.all('input_line')).single['amount'], 0);
     expect(() => s.addLine(siteId: site, workDate: '2026-11-14', kind: '인력', item: '보통인부', qty: 1, unit: '인', unitPrice: '', payee: '김반장'),
         throwsA(isA<StoreError>()));
+  });
+
+  test('한 사람 하루 10.5공수처럼 잘못 친 숫자는 저장 안 됨', () async {
+    final s = Store(MemoryDb(), device: 'phone');
+    final site = await s.receive('긴급', '긴급', '2026-11-10');
+    expect(() => s.addLine(siteId: site, workDate: '2026-11-10', kind: '인력', item: '보통인부', qty: '10.5', unit: '인', unitPrice: 187000, payee: '김반장'),
+        throwsA(isA<StoreError>()));
+    final id = await s.addLine(siteId: site, workDate: '2026-11-10', kind: '인력', item: '보통인부', qty: '0.5', unit: '인', unitPrice: 187000, payee: '김반장');
+    expect(() => s.editLine(id, qty: '15'), throwsA(isA<StoreError>()));
+    // 장비 대수·자재 수량은 막지 않는다
+    await s.addLine(siteId: site, workDate: '2026-11-10', kind: '장비', item: '덤프 25톤', qty: '12', unit: '대', unitPrice: 282000, payee: '한빛운수');
   });
 }

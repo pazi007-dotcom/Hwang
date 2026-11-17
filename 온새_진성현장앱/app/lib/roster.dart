@@ -86,6 +86,42 @@ extension Roster on Store {
     });
   }
 
+  /// 관급자재 배정: 이 현장에 이 자재가 얼마 배정됐나 (내역서 수량). 같은 현장·품명·규격이면 고친다.
+  /// supply: 관급자관급(발주처가 줌, 결제 없음) / 도급자관급(우리가 사고 공사비로 받음) / 사급
+  Future<void> setAllocation(String siteId, String item, String spec, String unit, Object qty, String supply) async {
+    final q = cleanQty(qty);
+    for (final a in await db.all('allocation')) {
+      if (a['site_id'] == siteId && a['item'] == item.trim() && (a['spec'] ?? '') == spec.trim()) {
+        await update('allocation', a['id'] as String, a['version'] as int,
+            {'alloc_qty': q, 'design_qty': q, 'supply': supply, 'unit': unit});
+        return;
+      }
+    }
+    await insert('allocation', {
+      'site_id': siteId, 'item': item.trim(), 'spec': spec.trim(), 'unit': unit, 'design_qty': q, 'alloc_qty': q,
+      'supply': supply, 'pool': null,
+    });
+  }
+
+  /// (품명|규격) → 이 현장 배정 (공급 구분, 배정량, 누계 사용)
+  Future<Map<String, ({String supply, num alloc, num used, String unit})>> allocations(String siteId) async {
+    final logs = {for (final l in await db.all('work_log')) l['id']: l};
+    final out = <String, ({String supply, num alloc, num used, String unit})>{};
+    for (final a in await db.all('allocation')) {
+      if (a['site_id'] != siteId) continue;
+      num used = 0;
+      for (final l in await db.all('input_line')) {
+        if (l['kind'] == '자재' && l['item'] == a['item'] && (l['spec'] ?? '') == (a['spec'] ?? '') &&
+            logs[l['log_id']]?['site_id'] == siteId) {
+          used += num.parse(l['qty'] as String);
+        }
+      }
+      out['${a['item']}|${a['spec'] ?? ''}'] =
+          (supply: a['supply'] as String, alloc: num.parse(a['alloc_qty'] as String), used: used, unit: a['unit'] as String);
+    }
+    return out;
+  }
+
   /// 명부에서 빼기(지난 일지·집계는 그대로).
   Future<void> retireRoster(String id) async {
     final r = await mustGet('roster', id);

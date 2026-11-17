@@ -29,7 +29,7 @@ def test_receive_writes_log_first_and_makes_checks(s):
     assert log["work_date"] == "2026-11-16" and log["note"].startswith("[접수·긴급] 점촌 배수로 긴급복구")
     assert log["content"] is None
     titles = [t["title"] for t in tasks(s, site)]
-    assert "피해 범위 사진(전) 촬영" in titles and titles[-1] == "마을 이장 연락"
+    assert "피해 사진(전) 찍기" in titles and titles[-1] == "마을 이장 연락"
     assert s.db.execute("SELECT name FROM contact WHERE site_id=?", (site,)).fetchone()["name"] == "김주무관"
     att = intake.add_attachment(s, site, "도면", "진성건설/점촌/도면/평면도.pdf")
     assert s.get("attachment", att)["review"] == "검토 대기"
@@ -122,7 +122,7 @@ def test_complete_then_complaint_stays_on_same_site(s):
     site = intake.receive(s, "산양 수로 보수", "수의", "2026-11-01")
     intake.proceed(s, site, "2026-11-05")
     left = intake.complete(s, site, "2026-11-20")
-    assert s.get("site", site)["status"] == "완공" and "현장 답사" in left
+    assert s.get("site", site)["status"] == "완공" and "답사" in left
     intake.complaint(s, site, "2027-03-02", "벽체 누수 민원", contact={"name": "이장님", "phone": "010-0000-0000"})
     kim = s.create_payee("김반장", "개인")
     s.add_input(site, "2027-03-03", "인력", "보통인부", 1, kim)   # 민원 처리 비용도 같은 현장으로

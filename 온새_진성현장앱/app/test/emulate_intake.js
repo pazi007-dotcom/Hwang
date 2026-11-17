@@ -21,7 +21,7 @@ const OUT = process.argv[2]; let n = 0; const notes = [];
     await type('공사 위치 (주소·마을·도로명 등)', '점촌동 123-4 앞 도로');
     await tap('button', '지금 위치'); await p.waitForTimeout(2500);
     await type('연락처 이름', '박주무관'); await type('전화번호', '054-550-6000');
-    await clickText('현장 위치·진입로 확인', false); await p.waitForTimeout(300);
+    await clickText('피해 사진(전) 찍기', false); await p.waitForTimeout(300);
     await shot('접수 창 (긴급, 위치·체크)');
     await scroll(600); await shot('접수 창 아래');
     await tap('button', '접수', true); await p.waitForTimeout(1000); await shot('접수 뒤 홈');

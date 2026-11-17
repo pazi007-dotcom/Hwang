@@ -41,6 +41,10 @@ class _JinsungAppState extends State<JinsungApp> {
     return MaterialApp(
       title: '진성현장',
       debugShowCheckedModeBanner: false,
+      // 날짜 고르기·확인 단추까지 한국어로
+      locale: const Locale('ko', 'KR'),
+      supportedLocales: const [Locale('ko', 'KR')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: t.theme(),
       home: Shell(store: widget.store, tokens: t, onToggleOutdoor: () => setState(() => outdoor = !outdoor)),
     );
@@ -56,8 +60,9 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => _ShellState();
 }
 
-class _ShellState extends State<Shell> {
+class _ShellState extends State<Shell> with WidgetsBindingObserver {
   int tab = 0;
+  String today = workDateOf(DateTime.now()); // 앱을 켜 둔 채 날이 바뀌면 일지 날짜도 오늘로
   String? siteId;
   List<Rec> sites = [];
   int version = 0; // 자료가 바뀌면 올려서 화면을 다시 그린다
@@ -67,7 +72,23 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     reload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 다음 날 아침 앱을 다시 열면(백그라운드에서 돌아오면) 일지·결제 화면이 오늘 기준으로 바뀐다.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && workDateOf(DateTime.now()) != today) {
+      today = workDateOf(DateTime.now());
+      reload();
+    }
   }
 
   Future<void> reload() async {
@@ -218,10 +239,11 @@ class _ShellState extends State<Shell> {
     final pages = [
       HomePage(key: ValueKey('h$version$siteId'), store: widget.store, siteId: siteId, tokens: t,
           onChanged: reload),
-      LogPage(key: ValueKey('l$siteId'), store: widget.store, siteId: siteId, tokens: t,
+      LogPage(key: ValueKey('l$siteId$today'), store: widget.store, siteId: siteId, tokens: t,
           onChanged: reload),
-      PayPage(key: ValueKey('p$version'), store: widget.store, tokens: t, onChanged: reload),
-      RosterPage(key: ValueKey('r$version'), store: widget.store, tokens: t, onChanged: reload),
+      PayPage(key: ValueKey('p$version$today'), store: widget.store, tokens: t, onChanged: reload),
+      RosterPage(key: ValueKey('r$version$siteId'), store: widget.store, tokens: t, onChanged: reload, siteId: siteId,
+          siteName: sites.where((x) => x['id'] == siteId).map((x) => x['name'] as String).firstOrNull),
       SyncPage(key: ValueKey('s$version'), store: widget.store, tokens: t, onChanged: reload),
     ];
     return Scaffold(
@@ -290,6 +312,9 @@ class Row2 extends StatelessWidget {
         ],
       ]);
 }
+
+/// 숫자 칸을 누르면 안의 값이 통째로 선택된다 → 바로 치면 바뀐다 (1 뒤에 0.5가 붙어 10.5가 되는 일 방지).
+void selectAll(TextEditingController c) => c.selection = TextSelection(baseOffset: 0, extentOffset: c.text.length);
 
 class Section extends StatelessWidget {
   const Section({super.key, required this.title, required this.children});
@@ -742,6 +767,7 @@ class _LogPageState extends State<LogPage> {
                           child: TextField(
                             key: ValueKey('pickq_${r.label}'),
                             controller: picked[r.id],
+                            onTap: () => selectAll(picked[r.id]!),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             decoration: InputDecoration(labelText: r.unit),
                           ),
@@ -986,6 +1012,7 @@ class _LogPageState extends State<LogPage> {
                 child: TextField(
                     key: const ValueKey('f_qty'),
                     controller: qty,
+                    onTap: () => selectAll(qty),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: '수량 (반일 0.5)')),
               ),
@@ -995,6 +1022,7 @@ class _LogPageState extends State<LogPage> {
             TextField(
               key: const ValueKey('f_price'),
               controller: price,
+              onTap: () => selectAll(price),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(labelText: '단가 (원)'),
               onChanged: (_) => priceTouched = true,
@@ -1113,6 +1141,7 @@ class _LineEditorState extends State<LineEditor> {
             TextField(
               key: ValueKey('e_$k'),
               controller: c[k],
+              onTap: (k == 'qty' || k == 'price') ? () => selectAll(c[k]!) : null,
               keyboardType: (k == 'qty' || k == 'price') ? const TextInputType.numberWithOptions(decimal: true) : null,
               decoration: InputDecoration(labelText: labels[k]),
             ),
@@ -1153,7 +1182,10 @@ class PayPage extends StatefulWidget {
 }
 
 class _PayPageState extends State<PayPage> {
-  String month = workDateOf(DateTime.now()).substring(0, 7);
+  // 1~10일은 지난달 보고·결제 요청 시기 → 지난달을 먼저 보여 준다
+  String month = DateTime.now().day <= 10
+      ? monthShift(workDateOf(DateTime.now()).substring(0, 7), -1)
+      : workDateOf(DateTime.now()).substring(0, 7);
   int refresh = 0;
   Store get s => widget.store;
 
@@ -1350,9 +1382,12 @@ class _PayPageState extends State<PayPage> {
             const SizedBox(height: 8),
             FilledButton(
                 key: const ValueKey('send_mail'),
-                onPressed: sendSum > 0 ? () => _sendMail(sendSum, payouts) : null,
-                child: Text(req != null && req.status == '전송됨' && req.amount != sendSum && sendSum > 0
-                    ? '정정 보고 다시 보내기'
+                // 보낸 뒤 숫자가 그대로면 다시 못 누른다(두 번 보내기 방지). 일지를 고쳐 숫자가 바뀌면 정정 보고.
+                onPressed: sendSum > 0 && !(req?.status == '전송됨' && req!.amount == sendSum)
+                    ? () => _sendMail(sendSum, payouts)
+                    : null,
+                child: Text(req?.status == '전송됨'
+                    ? (req!.amount == sendSum || sendSum == 0 ? '보고 보냄 (${req.date.substring(5)})' : '정정 보고 다시 보내기')
                     : '대표님께 보고 메일 보내기')),
             const SizedBox(height: 4),
             Wrap(alignment: WrapAlignment.end, children: [

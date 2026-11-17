@@ -256,7 +256,7 @@ def _sheet_attendance(wb, store, month, firm):
     cD = D0 + ndays                  # 일수
     cQ, cP, cA, cT, cL = cD + 1, cD + 2, cD + 3, cD + 4, cD + 5   # 수량·단가·금액·소득세·지방소득세
     N = cL
-    _widths(ws, [7, 12, 10, 16] + [4.2] * ndays + [5, 7, 9, 11, 9, 9])
+    _widths(ws, [7, 12, 10, 24] + [4.2] * ndays + [5, 7, 9, 11, 9, 9])
     _title(ws, firm, f"{y}년 {m}월 출역표 (1일~{ndays}일)",
            "칸 숫자 = 그날 그 현장에서의 공수(인)·일수(대). 굵은 줄(두 현장 이상이면 「계」 줄) = 그 사람의 한 달: "
            "근무일수·지급액·소득세·지방소득세 → 일용근로소득 지급명세서·원천세 신고용.", N)
@@ -386,7 +386,7 @@ def _gov_rows(store, month):
 def _sheet_material(wb, store, month, firm):
     ws = wb.create_sheet("자재")
     N = 11
-    _widths(ws, [10, 18, 12, 14, 6, 10, 10, 10, 10, 12, 12])
+    _widths(ws, [10, 24, 13, 13, 6, 10, 9, 9, 10, 12, 12])
     y, m = month[:4], int(month[5:])
     _title(ws, firm, f"{y}년 {m}월 자재", "관급자재: 배정량 대비 사용·남은·부족.  사급자재: 거래처별 구입 (단가를 안 넣은 줄은 금액 공란).", N)
 

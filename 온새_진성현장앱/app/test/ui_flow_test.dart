@@ -57,7 +57,7 @@ Future<void> receive(WidgetTester t, String name, {String? type, bool full = fal
     await t.tap(find.byKey(const ValueKey('rc_contact')));
     await t.pumpAndSettle();
     expect(find.text('054-550-6000'), findsOneWidget);
-    final ck = find.byKey(const ValueKey('ck_현장 위치·진입로 확인'));
+    final ck = find.byKey(const ValueKey('ck_피해 사진(전) 찍기'));
     await t.ensureVisible(ck);
     await t.pumpAndSettle();
     await t.tap(ck);
@@ -105,8 +105,8 @@ void main() {
       expect([em['job_type'], em['address'], em['gps_lat']], ['긴급', '점촌동 123-4 앞 도로', 36.72381]);
       expect((await store.db.all('contact')).single['phone'], '054-550-6000');
       final tasks = (await store.db.all('site_task')).where((x) => x['site_id'] == em['id']).toList();
-      expect(tasks.length, 4);
-      expect([for (final x in tasks) if (x['done'] == 1) x['title']], ['현장 위치·진입로 확인']);
+      expect(tasks.length, 2); // 긴급은 두 가지만
+      expect([for (final x in tasks) if (x['done'] == 1) x['title']], ['피해 사진(전) 찍기']);
 
       // 2) 일지 탭: 현재 현장은 방금 접수한 '점촌 긴급복구'
       await t.tap(find.text('일지'));

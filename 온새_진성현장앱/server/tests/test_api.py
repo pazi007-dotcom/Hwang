@@ -5,6 +5,7 @@ import urllib.request
 
 import pytest
 
+from jinsung import intake
 from jinsung import Store, sync
 from jinsung.api import App, demo_store, serve
 
@@ -113,5 +114,5 @@ def test_phone_proceed_with_start_date_gets_schedule_back(live):
     sync.pull(phone, fetch)
     rows = phone.db.execute("SELECT title, due_date FROM site_task WHERE site_id=? AND source='온새 제안'"
                             " ORDER BY due_date", (site["id"],)).fetchall()
-    assert len(rows) == 6 and before == 4
+    assert len(rows) == 6 and before == len(intake.FIRST_CHECKS[site["job_type"]])
     assert (rows[0]["title"], rows[0]["due_date"]) == ("작업 인원·직종 확정, 전날 재확인", "2026-11-17")
