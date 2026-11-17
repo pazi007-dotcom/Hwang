@@ -1636,6 +1636,9 @@ class _PayPageState extends State<PayPage> {
   }
 }
 
+/// 앱 버전 (pubspec.yaml 의 version 과 같게 올린다). 동기화 탭 맨 아래에 보인다.
+const appVersion = '0.4.1';
+
 // ───────────────────────── 동기화 ─────────────────────────
 class SyncPage extends StatefulWidget {
   const SyncPage({super.key, required this.store, required this.tokens, required this.onChanged});
@@ -1717,6 +1720,8 @@ class _SyncPageState extends State<SyncPage> {
               const Divider(height: Tokens.group),
             ],
           ]),
+          const SizedBox(height: Tokens.gap),
+          Center(child: Text('진성현장 앱 $appVersion', key: const ValueKey('app_version'), style: Theme.of(context).textTheme.bodySmall)),
         ]);
       },
     );
