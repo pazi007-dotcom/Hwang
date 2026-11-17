@@ -154,6 +154,12 @@ class App:
         touched = {c["row_id"] for c, r in zip(changes, results)
                    if c["table_name"] == "site" and r["status"] == "적용" and c["op"] != "삭제"
                    and ("planned_start" in (c["data_json"] or "") or c["op"] == "추가")}
+        # 진행 중인 현장에 U형 개거 공종이 새로 들어오면 물량 기준으로 발주·체크 일정을 다시 만든다
+        for c, r in zip(changes, results):
+            if c["table_name"] == "work_type" and r["status"] == "적용" and c["op"] == "추가":
+                wt = self.store.db.execute("SELECT site_id, template_code FROM work_type WHERE id=?", (c["row_id"],)).fetchone()
+                if wt and wt["template_code"] == "9":
+                    touched.add(wt["site_id"])
         for site_id in touched:
             row = self.store.db.execute("SELECT status, planned_start FROM site WHERE id=?",
                                         (site_id,)).fetchone()

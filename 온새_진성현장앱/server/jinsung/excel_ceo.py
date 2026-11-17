@@ -87,6 +87,12 @@ def _head(ws, r, titles):
     ws.row_dimensions[r].height = 30
 
 
+def _progress_of(store, site_name):
+    from .excel_report import _site_progress
+    row = store.db.execute("SELECT id FROM site WHERE name=?", (site_name,)).fetchone()
+    return _site_progress(store, row["id"]) if row else None
+
+
 def _lines(store, month):
     start, end = reports.month_range(month)
     return reports._lines(store, start, end)
@@ -198,7 +204,8 @@ def _sheet_report(wb, store, month, firm, check):
         _c(ws, r, 3)
         _c(ws, r, 4)
         ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=6)
-        _c(ws, r, 5, f'{len(days[x["site"]])}일', align="center")
+        prog = _progress_of(store, x["site"])
+        _c(ws, r, 5, f'{len(days[x["site"]])}일' + (f' · 공정 {prog:.0%}' if prog is not None else ''), align="center", size=9)
         _c(ws, r, 6)
         for c, k in zip(range(7, 11), ("인력", "장비", "자재", "외주")):
             _c(ws, r, c, x.get(k, 0) or None, fmt=WON)

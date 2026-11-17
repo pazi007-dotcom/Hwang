@@ -116,3 +116,27 @@ def test_phone_proceed_with_start_date_gets_schedule_back(live):
                             " ORDER BY due_date", (site["id"],)).fetchall()
     assert len(rows) == 6 and before == len(intake.FIRST_CHECKS[site["job_type"]])
     assert (rows[0]["title"], rows[0]["due_date"]) == ("작업 인원·직종 확정, 전날 재확인", "2026-11-17")
+
+
+def test_phone_adds_channel_work_type_and_schedule_follows_quantities(live):
+    """진행 중인 현장에 폰이 U형 개거 공종(250m)을 올리면 물량 기준 발주(철근·유로폼·레미콘)로 다시 계획한다."""
+    store, base = live
+    phone = Store(device="phone")
+    send = lambda ch: json.loads(call(base, "/api/sync/push", {"changes": ch})[1])      # noqa: E731
+    fetch = lambda seq: json.loads(call(base, f"/api/sync/pull?since={seq}&device=phone")[1])  # noqa: E731
+    sync.pull(phone, fetch)
+    site = phone.db.execute("SELECT * FROM site WHERE status='접수'").fetchone()
+    phone.update("site", site["id"], site["version"], {"status": "진행", "planned_start": "2026-11-20"})
+    sync.push(phone, send)
+    sync.pull(phone, fetch)
+    generic = {r["title"] for r in phone.db.execute("SELECT title FROM site_task WHERE site_id=? AND source='온새 제안'", (site["id"],))}
+    phone._insert("work_type", {"site_id": site["id"], "template_code": "9", "name": "U형 개거", "design_length": "250",
+                                "design_params": '{"inner_w": "1.0", "wall_h": "1.0", "part": "all"}'})
+    sync.push(phone, send)
+    sync.pull(phone, fetch)
+    rows = phone.db.execute("SELECT title, qty, unit FROM site_task WHERE site_id=? AND source='온새 제안' AND done=0",
+                            (site["id"],)).fetchall()
+    titles = {r["title"] for r in rows}
+    assert any(t.startswith("철근 가공 발주") for t in titles) and titles != generic
+    rebar = next(r for r in rows if r["title"].startswith("철근 가공 발주"))
+    assert rebar["unit"] == "ton" and float(rebar["qty"]) > 1

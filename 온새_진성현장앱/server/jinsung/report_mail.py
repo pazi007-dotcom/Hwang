@@ -17,6 +17,11 @@ def _w(n) -> str:
     return f"{int(n):,}"
 
 
+def _prog(store, site_name):
+    from .excel_ceo import _progress_of
+    return _progress_of(store, site_name)
+
+
 def _card(label, value, unit="원", accent=False):
     return (f'<td style="padding:12px 14px;border:1px solid {LINE};border-radius:8px;background:#fff;width:50%">'
             f'<div style="font-size:12px;color:{SUB}">{label}</div>'
@@ -74,7 +79,9 @@ def render(store: Store, month: str, sender: str = "현장소장") -> str:
 
     srows = "".join(
         f'<tr><td style="padding:9px 4px;border-bottom:1px solid {LINE}">'
-        f'<div style="font-size:14px;font-weight:700">{escape(x["site"])}</div>'
+        f'<div style="font-size:14px;font-weight:700">{escape(x["site"])}'
+        + (f' <span style="font-size:12px;font-weight:600;color:{ACCENT}">공정 {p:.0%}</span>' if (p := _prog(store, x["site"])) is not None else '')
+        + '</div>'
         f'<div style="font-size:12px;color:{SUB};margin-top:2px">'
         + " · ".join(f"{k} {_w(x.get(k, 0))}" for k in ("인력", "장비", "자재", "외주") if x.get(k)) +
         f'</div></td><td style="padding:9px 4px;border-bottom:1px solid {LINE};text-align:right;vertical-align:top;'

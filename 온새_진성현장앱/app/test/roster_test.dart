@@ -4,6 +4,7 @@ import 'package:jinsung_app/ledger.dart';
 import 'package:jinsung_app/roster.dart';
 import 'package:jinsung_app/row_db.dart';
 import 'package:jinsung_app/store.dart';
+import 'package:jinsung_app/works.dart';
 
 void main() {
   test('명부 등록 → 두 달 출역 → 사람별 달력·월·연간', () async {
@@ -79,5 +80,17 @@ void main() {
     await s.setAllocation(ys, '레미콘', '25-21-08', '㎥', '170', '도급자관급'); // 고치면 덮어씀
     a = (await s.allocations(ys))['레미콘|25-21-08']!;
     expect([(await s.db.all('allocation')).length, a.alloc], [1, 170]);
+  });
+
+  test('공종 추가 → 측점으로 시공 연장 → 공정률', () async {
+    final s = Store(MemoryDb(), device: 'phone');
+    final ys = await s.receive('요성리', '공사', '2026-11-02');
+    final wt = await s.addWorkType(ys, 'U형 개거', '250', channel: true);
+    await s.addProgressSta(ys, '2026-11-09', wt, 'No.0', 'No.0+12');
+    await s.addProgressSta(ys, '2026-11-10', wt, 'No.0+12', 'No.1+4');
+    final w = (await s.workProgress(ys, workDate: '2026-11-10')).single;
+    expect([w.done, w.design, w.today.length], [24, 250, 1]);
+    expect(w.rate, closeTo(0.096, 1e-9));
+    expect(() => s.addProgressSta(ys, '2026-11-11', wt, 'No.2', 'No.1'), throwsA(isA<StoreError>()));
   });
 }

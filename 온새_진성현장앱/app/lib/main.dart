@@ -14,6 +14,7 @@ import 'stations.dart';
 import 'store.dart';
 import 'sync.dart';
 import 'tokens.dart';
+import 'works.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -458,7 +459,64 @@ class HomePage extends StatelessWidget {
       'conflicts': (await store.db.openConflicts()).length,
       'pending': (await store.db.changesSince(await store.db.cursor('집PC', 'out'), onlyDevice: store.device)).length,
       'recent': recent,
+      'works': await store.workProgress(id),
     };
+  }
+
+  /// 공종 추가: 이름·연장. U형 개거면 내폭·높이 → 집 PC가 물량·발주 일정을 계산.
+  Future<void> _addWork(BuildContext context) async {
+    final name = TextEditingController(text: 'U형 개거');
+    final len = TextEditingController();
+    final w = TextEditingController(text: '1.0');
+    final h = TextEditingController(text: '1.0');
+    var channel = true;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(Tokens.pad),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('공종 추가', style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: Tokens.gap),
+              Wrap(spacing: 8, children: [
+                ChoiceChip(label: const Text('U형 개거 (물량·발주 자동)'), selected: channel,
+                    onSelected: (_) => setD(() { channel = true; if (name.text.isEmpty) name.text = 'U형 개거'; })),
+                ChoiceChip(label: const Text('기타'), selected: !channel,
+                    onSelected: (_) => setD(() { channel = false; if (name.text == 'U형 개거') name.text = ''; })),
+              ]),
+              const SizedBox(height: Tokens.gap),
+              TextField(key: const ValueKey('wt_name'), controller: name, decoration: const InputDecoration(labelText: '공종 이름')),
+              const SizedBox(height: Tokens.gap),
+              TextField(key: const ValueKey('wt_len'), controller: len, onTap: () => selectAll(len),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: '설계 연장 (m)')),
+              if (channel) ...[
+                const SizedBox(height: Tokens.gap),
+                Row2(children: [
+                  Expanded(child: TextField(controller: w, onTap: () => selectAll(w), decoration: const InputDecoration(labelText: '내폭 (m)'))),
+                  Expanded(child: TextField(controller: h, onTap: () => selectAll(h), decoration: const InputDecoration(labelText: '높이 (m)'))),
+                ]),
+              ],
+              const SizedBox(height: Tokens.gap),
+              FilledButton(key: const ValueKey('wt_save'), onPressed: () => Navigator.pop(ctx, true), child: const Text('추가')),
+            ]),
+          ),
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await store.addWorkType(siteId!, name.text, len.text, channel: channel, innerW: w.text.trim(), wallH: h.text.trim());
+      await onChanged();
+      if (context.mounted) {
+        showMessage(context, channel ? '공종을 추가했습니다. 집 PC와 맞추면 물량·발주 일정이 내려옵니다.' : '공종을 추가했습니다.');
+      }
+    } on StoreError catch (e) {
+      if (context.mounted) showMessage(context, e.message);
+    }
   }
 
   @override
@@ -514,6 +572,23 @@ class HomePage extends StatelessWidget {
                   Expanded(child: OutlinedButton(onPressed: () => _act(context, a), child: Text(a))),
               ]),
             ],
+          ]),
+          const SizedBox(height: Tokens.gap),
+          Section(title: '공종·공정률', children: [
+            for (final w in d['works'] as List<WorkProgress>) ...[
+              Row(children: [
+                Expanded(child: Text(w.name, style: const TextStyle(fontWeight: FontWeight.w700))),
+                Text('${(w.rate * 100).toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.w700)),
+              ]),
+              const SizedBox(height: 4),
+              LinearProgressIndicator(value: w.rate, minHeight: 8, borderRadius: BorderRadius.circular(4)),
+              Text('${fmtQty(w.done)} / ${fmtQty(w.design)}m', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+            ],
+            if ((d['works'] as List).isEmpty)
+              Text('공종을 넣으면 일지에서 측점으로 시공 연장을 남기고 공정률이 나옵니다.', style: Theme.of(context).textTheme.bodySmall),
+            if (status != '완공' && status != '취소')
+              OutlinedButton(key: const ValueKey('wt_add'), onPressed: () => _addWork(context), child: const Text('+ 공종 추가')),
           ]),
           const SizedBox(height: Tokens.gap),
           Section(title: '발주·체크 (기한순)', children: [
@@ -589,6 +664,9 @@ class LogPage extends StatefulWidget {
 
 class _LogPageState extends State<LogPage> {
   DateTime date = DateTime.now();
+  String? progWt;
+  final progFrom = TextEditingController();
+  final progTo = TextEditingController();
   String kind = '인력';
   final item = TextEditingController();
   final spec = TextEditingController();
@@ -649,13 +727,22 @@ class _LogPageState extends State<LogPage> {
     final items = await s.recentItems(kind);
     final payees = await s.recentPayees(kind, item: item.text.trim());
     final wts = (await s.db.all('work_type')).where((w) => w['site_id'] == widget.siteId).toList();
+    final works = widget.siteId == null ? <WorkProgress>[] : await s.workProgress(widget.siteId!, workDate: workDate);
+    if (progFrom.text.isEmpty && works.isNotEmpty) {
+      // 시공 측점 시작 = 지난번 끝 (매일 이어서)
+      num end = 0;
+      for (final p in await s.db.all('progress')) {
+        if (p['work_type_id'] == (progWt ?? works.first.id)) end = [end, num.tryParse((p['sta_to'] ?? '0') as String) ?? 0].reduce((a, b) => a > b ? a : b);
+      }
+      progFrom.text = formatSta(end);
+    }
     final lines = widget.siteId == null ? <Rec>[] : await s.linesOf(widget.siteId!, workDate);
     final names = {for (final p in await s.db.all('payee')) p['id']: p['name']};
     Rec? log;
     for (final l in await s.db.all('work_log')) {
       if (l['site_id'] == widget.siteId && l['work_date'] == workDate) log = l;
     }
-    return {'items': items, 'payees': payees, 'wts': wts, 'lines': lines, 'names': names, 'log': log};
+    return {'items': items, 'payees': payees, 'wts': wts, 'lines': lines, 'names': names, 'log': log, 'works': works};
   }
 
   Future<void> _pickDate() async {
@@ -1099,6 +1186,51 @@ class _LogPageState extends State<LogPage> {
               Expanded(child: OutlinedButton(onPressed: _noWork, child: const Text('작업 없음(비 등)'))),
             ]),
           ]),
+          if ((d['works'] as List<WorkProgress>).isNotEmpty) ...[
+            const SizedBox(height: Tokens.gap),
+            Section(title: '6. 오늘 시공 (공정률)', children: [
+              for (final w in d['works'] as List<WorkProgress>) ...[
+                Text('${w.name}  ${fmtQty(w.done)}/${fmtQty(w.design)}m (${(w.rate * 100).toStringAsFixed(0)}%)',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                for (final p in w.today)
+                  Text('  $workDate  ${formatSta(num.parse(p['sta_from'] as String))} → ${formatSta(num.parse(p['sta_to'] as String))}  ${p['qty']}m',
+                      style: Theme.of(context).textTheme.bodySmall),
+              ],
+              const SizedBox(height: 8),
+              if ((d['works'] as List).length > 1)
+                DropdownButtonFormField<String>(
+                  initialValue: progWt ?? (d['works'] as List<WorkProgress>).first.id,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '공종'),
+                  items: [for (final w in d['works'] as List<WorkProgress>) DropdownMenuItem(value: w.id, child: Text(w.name))],
+                  onChanged: (v) => progWt = v,
+                ),
+              Row2(children: [
+                Expanded(child: TextField(key: const ValueKey('pg_from'), controller: progFrom,
+                    decoration: const InputDecoration(labelText: '시공 측점 시작'))),
+                Expanded(child: TextField(key: const ValueKey('pg_to'), controller: progTo,
+                    decoration: const InputDecoration(labelText: '시공 측점 끝'))),
+              ]),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const ValueKey('pg_save'),
+                onPressed: () async {
+                  try {
+                    await s.addProgressSta(widget.siteId!, workDate, progWt ?? (d['works'] as List<WorkProgress>).first.id,
+                        progFrom.text, progTo.text);
+                    progFrom.text = progTo.text; // 내일은 오늘 끝에서 시작
+                    progTo.clear();
+                    setState(() => refresh++);
+                    await widget.onChanged();
+                    if (context.mounted) showMessage(context, '시공 연장을 남겼습니다.');
+                  } on StoreError catch (e) {
+                    if (context.mounted) showMessage(context, e.message);
+                  }
+                },
+                child: const Text('시공 연장 저장'),
+              ),
+            ]),
+          ],
         ]);
       },
     );
