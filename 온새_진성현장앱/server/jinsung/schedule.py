@@ -27,6 +27,14 @@ def _d(day: str, delta: int) -> str:
     return (date.fromisoformat(day) + timedelta(days=delta)).isoformat()
 
 
+def _workday_before(day: str) -> str:
+    """기한이 토·일이면 그 전 금요일로 (월요일 아침에 '2일 지남'으로 보이지 않게)."""
+    d = date.fromisoformat(day)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.isoformat()
+
+
 def _q(x) -> str:
     return f"{D(str(x)).quantize(D('0.01')).normalize():f}"
 
@@ -101,7 +109,10 @@ def plan(store: Store, site_id: str) -> list[str]:
     for kind, title, offset, qty, unit, wt in rows:
         if title in kept or same(title):        # 이미 끝낸 일·체크리스트와 같은 일은 다시 만들지 않는다
             continue
-        ids.append(intake.add_task(store, site_id, kind, title, due_date=_d(start, offset),
+        due = _d(start, offset)
+        if offset < 0:                          # 준비(발주·확인)는 주말 전에. 시작 후 확인(사진 후 등)은 그대로
+            due = _workday_before(due)
+        ids.append(intake.add_task(store, site_id, kind, title, due_date=due,
                                    qty=None if qty is None else _q(qty), unit=unit, work_type_id=wt,
                                    source="온새 제안"))
     return ids

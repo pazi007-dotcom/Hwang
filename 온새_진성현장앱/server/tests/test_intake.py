@@ -104,7 +104,7 @@ def test_changing_start_moves_only_unfinished_suggestions(s):
     t = {x["title"]: x for x in tasks(s, y["site"])}
     assert t["철근 가공 발주 (D16 U바·헌치근, D13 배력근)"]["done_date"] == "2026-11-20"   # 끝낸 일 그대로
     assert t["마을 방송 요청"]["id"] == mine                      # 직접 만든 일 그대로
-    assert t["굴삭기·덤프·펌프카 예약"]["due_date"] == "2026-12-05"
+    assert t["굴삭기·덤프·펌프카 예약"]["due_date"] == "2026-12-04"   # 12/5 토 → 금요일로
     assert len(t) == 44 + 1
 
 

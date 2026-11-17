@@ -152,3 +152,16 @@ def test_inserted_row_is_sent_with_defaults():
     ch = [c for c in sync.changes_since(s, 0) if c["table_name"] == "site_task"][-1]
     data = json.loads(ch["data_json"])
     assert data["version"] == 1 and data["done"] == 0
+
+
+def test_schedule_due_dates_never_fall_on_weekend():
+    """시작 11/9(월) 기준 준비 일정은 토·일이 아니라 그 전 금요일까지."""
+    from datetime import date
+    from jinsung import schedule
+    s = Store(device="pc")
+    site = s.quick_emergency_site("요성리")
+    s.update("site", site, s.get("site", site)["version"], {"status": "진행", "planned_start": "2026-11-09"})
+    schedule.plan(s, site)
+    dues = [r["due_date"] for r in s.db.execute("SELECT due_date FROM site_task WHERE site_id=? AND source='온새 제안'"
+                                                 " AND due_date < '2026-11-09'", (site,))]
+    assert dues and all(date.fromisoformat(d).weekday() < 5 for d in dues)
