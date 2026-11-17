@@ -7,5 +7,6 @@ import 'store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(JinsungApp(store: Store(MemoryDb(), device: 'blank')));
+  // 실제 앱처럼 기기마다 다른 이름 (같은 이름이면 집 PC가 '내 기록'으로 보고 내려 주지 않는다)
+  runApp(JinsungApp(store: Store(MemoryDb(), device: 'web-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}')));
 }

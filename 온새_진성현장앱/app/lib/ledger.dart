@@ -99,7 +99,7 @@ extension Ledger on Store {
     final site = await mustGet('site', siteId!);
     if (site['status'] == '접수') {
       // 투입이 들어왔다 = 실제로 일을 시작했다 → 진행 (긴급 건은 접수 당일 바로 일한다)
-      await update('site', siteId, site['version'] as int, {'status': '진행'});
+      await update('site', siteId, site['version'] as int? ?? 1, {'status': '진행'});
     }
     final sp = spec.trim();
     if (await findRate(kind, it, sp, null, wd) == null) {
@@ -138,24 +138,24 @@ extension Ledger on Store {
     if (note != null) ch['note'] = note.trim().isEmpty ? null : note.trim();
     if (ch.containsKey('qty') && !ch.containsKey('unit_price')) ch['unit_price'] = row['unit_price'];
     if (ch.isEmpty) return;
-    await update('input_line', lineId, row['version'] as int, ch, reason: reason);
+    await update('input_line', lineId, row['version'] as int? ?? 1, ch, reason: reason);
   }
 
   Future<void> deleteLine(String lineId, {String? reason}) async {
     final row = await mustGet('input_line', lineId);
-    await delete('input_line', lineId, row['version'] as int, reason: reason ?? '일지에서 삭제');
+    await delete('input_line', lineId, row['version'] as int? ?? 1, reason: reason ?? '일지에서 삭제');
   }
 
   Future<void> setWeather(String siteId, String workDate, String weather) async {
     final logId = await logFor(siteId, workDate);
     final row = await mustGet('work_log', logId);
-    await update('work_log', logId, row['version'] as int, {'weather': weather});
+    await update('work_log', logId, row['version'] as int? ?? 1, {'weather': weather});
   }
 
   Future<void> setLogContent(String siteId, String workDate, String content) async {
     final logId = await logFor(siteId, workDate);
     final row = await mustGet('work_log', logId);
-    await update('work_log', logId, row['version'] as int, {'content': content.trim()});
+    await update('work_log', logId, row['version'] as int? ?? 1, {'content': content.trim()});
   }
 
   // ---------- 추천값 ----------

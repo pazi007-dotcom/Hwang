@@ -71,7 +71,7 @@ extension Roster on Store {
     final u = unit.trim().isEmpty ? defaultUnit[kind]! : unit.trim();
     for (final r in await db.all('roster')) {
       if (r['payee_id'] == payeeId && r['kind'] == kind && r['item'] == it && (r['spec'] ?? '') == sp) {
-        await update('roster', r['id'] as String, r['version'] as int, {
+        await update('roster', r['id'] as String, r['version'] as int? ?? 1, {
           'unit': u, 'unit_price': price, 'active': 1,
           if (phone != null) 'phone': phone.trim().isEmpty ? null : phone.trim(),
           if (memo != null) 'memo': memo.trim().isEmpty ? null : memo.trim(),
@@ -92,7 +92,7 @@ extension Roster on Store {
     final q = cleanQty(qty);
     for (final a in await db.all('allocation')) {
       if (a['site_id'] == siteId && a['item'] == item.trim() && (a['spec'] ?? '') == spec.trim()) {
-        await update('allocation', a['id'] as String, a['version'] as int,
+        await update('allocation', a['id'] as String, a['version'] as int? ?? 1,
             {'alloc_qty': q, 'design_qty': q, 'supply': supply, 'unit': unit});
         return;
       }
@@ -125,7 +125,7 @@ extension Roster on Store {
   /// 명부에서 빼기(지난 일지·집계는 그대로).
   Future<void> retireRoster(String id) async {
     final r = await mustGet('roster', id);
-    await update('roster', id, r['version'] as int, {'active': 0});
+    await update('roster', id, r['version'] as int? ?? 1, {'active': 0});
   }
 
   /// 일지에 처음 적은 사람·장비를 명부에 자동으로 넣는다(addLine 이 부름).

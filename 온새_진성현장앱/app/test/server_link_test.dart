@@ -59,4 +59,15 @@ void main() {
     expect(r.status, '전송됨', reason: r.result);
     expect(r.result, contains('월말보고_2026-12.xlsx'));
   }, skip: server.isEmpty ? '서버 주소 없음 (JINSUNG_SERVER)' : false);
+
+  test('집 PC가 만든 할 일(발주·체크)을 폰에서 체크할 수 있다', () async {
+    final phone = Store(MemoryDb(), device: 'phone-task');
+    await ServerLink(server).sync(phone);
+    final t = (await phone.db.all('site_task')).firstWhere((r) => r['done'] != 1);
+    expect(t['version'], isNotNull);
+    await phone.checkTask(t['id'] as String, '2026-11-16');
+    expect((await phone.mustGet('site_task', t['id'] as String))['done'], 1);
+    final up = await ServerLink(server).sync(phone);
+    expect(up.conflicts, 0);
+  }, skip: server.isEmpty ? '서버 주소 없음 (JINSUNG_SERVER)' : false);
 }

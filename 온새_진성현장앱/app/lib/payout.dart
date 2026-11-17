@@ -65,7 +65,7 @@ extension Payouts on Store {
     if (account != null) ch['account_no'] = account.trim();
     if (holder != null) ch['holder'] = holder.trim();
     if (rule != null) ch['pay_rule'] = rule;
-    await update('payee', payeeId, p['version'] as int, ch);
+    await update('payee', payeeId, p['version'] as int? ?? 1, ch);
   }
 
   Future<List<Payout>> monthPayouts(String month) async {

@@ -141,3 +141,14 @@ def test_phone_adds_channel_work_type_and_schedule_follows_quantities(live):
     assert any(t.startswith("철근 가공 발주") for t in titles) and titles != generic
     rebar = next(r for r in rows if r["title"].startswith("철근 가공 발주"))
     assert rebar["unit"] == "ton" and float(rebar["qty"]) > 1
+
+
+def test_inserted_row_is_sent_with_defaults():
+    """서버가 만든 행은 기본값(version·done)까지 보낸다. 빠지면 폰에서 체크·고치기가 안 된다."""
+    from jinsung import intake
+    s = Store(device="pc")
+    site = s.quick_emergency_site("긴급")
+    intake.add_task(s, site, "자재", "철근 가공 발주", qty="14.16", unit="ton", source="온새 제안")
+    ch = [c for c in sync.changes_since(s, 0) if c["table_name"] == "site_task"][-1]
+    data = json.loads(ch["data_json"])
+    assert data["version"] == 1 and data["done"] == 0

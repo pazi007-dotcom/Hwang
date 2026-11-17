@@ -115,7 +115,9 @@ class Store:
         marks = ", ".join("?" for _ in values)
         with self.db:
             self.db.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", list(values.values()))
-            self._log_change(table, values["id"], "추가", None, values)
+            # 기본값(version=1, done=0 등)까지 넣은 행 전체를 보낸다. 빠지면 폰에서 고치거나 체크할 수 없다
+            full = self.db.execute(f"SELECT * FROM {table} WHERE id = ?", (values["id"],)).fetchone()
+            self._log_change(table, values["id"], "추가", None, dict(full) if full else values)
         return values["id"]
 
     def _log_change(self, table, row_id, op, base_version, data, reason=None, device=None):

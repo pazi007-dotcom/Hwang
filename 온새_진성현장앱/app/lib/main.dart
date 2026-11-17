@@ -596,8 +596,12 @@ class HomePage extends StatelessWidget {
             for (final k in tasks.take(8))
               InkWell(
                 onTap: () async {
-                  await store.checkTask(k['id'] as String, d['today'] as String);
-                  await onChanged();
+                  try {
+                    await store.checkTask(k['id'] as String, d['today'] as String);
+                    await onChanged();
+                  } catch (e) {
+                    if (context.mounted) showMessage(context, '체크하지 못했습니다: $e');
+                  }
                 },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),

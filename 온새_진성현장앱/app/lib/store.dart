@@ -148,7 +148,7 @@ class Store {
         receivedDate: day, instructions: note, lat: lat, lon: lon);
     if (address != null && address.trim().isNotEmpty) {
       final row = await mustGet('site', site);
-      await update('site', site, row['version'] as int, {'address': address.trim()});
+      await update('site', site, row['version'] as int? ?? 1, {'address': address.trim()});
     }
     if (contactName != null && contactName.trim().isNotEmpty) {
       await insert('contact', {
@@ -164,7 +164,7 @@ class Store {
     final logId = await logFor(site, day);
     final row = await mustGet('work_log', logId);
     // 접수 기록은 특이사항(note)에 남긴다. 작업 내용(content)은 소장이 쓰는 칸이라 비워 둔다.
-    await update('work_log', logId, row['version'] as int,
+    await update('work_log', logId, row['version'] as int? ?? 1,
         {'note': '[접수·$jobType] ${name.trim()}${(address ?? '').trim().isEmpty ? '' : ' · 위치 ${address!.trim()}'}'
             '${note == null ? '' : ' — $note'}'});
     return site;
@@ -178,13 +178,13 @@ class Store {
 
   Future<void> checkTask(String taskId, String doneDate, {bool done = true}) async {
     final row = await mustGet('site_task', taskId);
-    await update('site_task', taskId, row['version'] as int,
+    await update('site_task', taskId, row['version'] as int? ?? 1,
         {'done': done ? 1 : 0, 'done_date': done ? parseWorkDate(doneDate) : null});
   }
 
   Future<void> _setStatus(String siteId, String status, Rec more) async {
     final row = await mustGet('site', siteId);
-    await update('site', siteId, row['version'] as int, {'status': status, ...more});
+    await update('site', siteId, row['version'] as int? ?? 1, {'status': status, ...more});
   }
 
   Future<void> hold(String siteId, String reason) async {
@@ -217,14 +217,14 @@ class Store {
     }
     final why = '취소 파기: ${reason.trim()}';
     for (final p in await db.all('progress')) {
-      if (logIds.contains(p['log_id'])) await delete('progress', p['id'] as String, p['version'] as int, reason: why);
+      if (logIds.contains(p['log_id'])) await delete('progress', p['id'] as String, p['version'] as int? ?? 1, reason: why);
     }
     for (final table in ['site_task', 'contact', 'attachment', 'photo', 'work_log', 'work_type', 'station', 'allocation']) {
       for (final r in await db.all(table)) {
-        if (r['site_id'] == siteId) await delete(table, r['id'] as String, r['version'] as int, reason: why);
+        if (r['site_id'] == siteId) await delete(table, r['id'] as String, r['version'] as int? ?? 1, reason: why);
       }
     }
-    await delete('site', siteId, (await mustGet('site', siteId))['version'] as int, reason: why);
+    await delete('site', siteId, (await mustGet('site', siteId))['version'] as int? ?? 1, reason: why);
     return '파기';
   }
 
@@ -329,7 +329,7 @@ class Store {
   Future<String> markNoWork(String siteId, String workDate, {String weather = '비'}) async {
     final logId = await logFor(siteId, workDate);
     final row = await mustGet('work_log', logId);
-    await update('work_log', logId, row['version'] as int, {'no_work': 1, 'weather': weather});
+    await update('work_log', logId, row['version'] as int? ?? 1, {'no_work': 1, 'weather': weather});
     return logId;
   }
 
@@ -398,9 +398,9 @@ class Store {
       final row = await db.get(table, id);
       if (row != null) {
         if (incoming['삭제'] == true) {
-          await delete(table, id, row['version'] as int, reason: '충돌 검토에서 선택');
+          await delete(table, id, row['version'] as int? ?? 1, reason: '충돌 검토에서 선택');
         } else {
-          await update(table, id, row['version'] as int, incoming, reason: '충돌 검토에서 선택');
+          await update(table, id, row['version'] as int? ?? 1, incoming, reason: '충돌 검토에서 선택');
         }
       }
     } else if (keep != 'current') {
@@ -472,6 +472,9 @@ class Store {
     if (op == '추가') {
       if (cur != null) return {'seq': seq, 'status': '건너뜀'};
       final row = await _remap(data!);
+      // 예전 집 PC는 기본값 칸(version, done)을 빼고 보냈다 → 채워 둔다 (없으면 체크·고치기가 안 됨)
+      row['version'] ??= 1;
+      if (table == 'site_task') row['done'] ??= 0;
       final twin = await _twin(table, row);
       if (twin != null) {
         await db.setAlias(ch['row_id'] as String, twin['id'] as String);
