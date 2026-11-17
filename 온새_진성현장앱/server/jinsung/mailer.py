@@ -116,16 +116,24 @@ def flush(store: Store, transport: Callable[[dict], None]) -> dict:
 
 
 def smtp_transport(host: str | None = None, port: int | None = None, user: str | None = None,
-                   password: str | None = None) -> Callable[[dict], None]:
-    """집 PC 서버용. 값은 환경 변수(JINSUNG_SMTP_HOST/PORT/USER/PASSWORD)에서 읽는다."""
+                   password: str | None = None, tls: str | None = None) -> Callable[[dict], None]:
+    """집 PC 서버용. 값은 환경 변수(JINSUNG_SMTP_HOST/PORT/USER/PASSWORD/TLS)에서 읽는다.
+
+    tls: starttls(기본, 587 — 네이버·지메일) / ssl(465) / none(시험용 가짜 메일 서버).
+    """
     host = host or os.environ["JINSUNG_SMTP_HOST"]
     port = port or int(os.environ.get("JINSUNG_SMTP_PORT", "587"))
     user = user or os.environ["JINSUNG_SMTP_USER"]
     password = password or os.environ["JINSUNG_SMTP_PASSWORD"]
+    tls = tls or os.environ.get("JINSUNG_SMTP_TLS", "starttls")
 
     def send(mail: dict) -> None:
         msg = EmailMessage()
-        msg["Subject"], msg["From"], msg["To"] = mail["subject"], user, ", ".join(mail["recipients"])
+        from email.utils import formataddr
+        from . import company
+        firm = company.load().get("name") or "진성건설"
+        msg["Subject"], msg["To"] = mail["subject"], ", ".join(mail["recipients"])
+        msg["From"] = formataddr((f"{firm} 현장", user))       # 대표님 메일함에 '진성건설(주) 현장'으로 보이게
         msg.set_content(mail["body"])
         if mail.get("html"):
             msg.add_alternative(mail["html"], subtype="html")
@@ -134,8 +142,10 @@ def smtp_transport(host: str | None = None, port: int | None = None, user: str |
             msg.add_attachment(p.read_bytes(), maintype="application",
                                subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                filename=p.name)
-        with smtplib.SMTP(host, port, timeout=30) as smtp:
-            smtp.starttls()
+        smtp = smtplib.SMTP_SSL(host, port, timeout=30) if tls == "ssl" else smtplib.SMTP(host, port, timeout=30)
+        with smtp:
+            if tls == "starttls":
+                smtp.starttls()
             smtp.login(user, password)
             smtp.send_message(msg)
     return send
@@ -185,3 +195,14 @@ def send_requested(store: Store, request_id: str, out_dir, transport=None, recip
     store.update("pay_request", request_id, req["version"], {
         "status": status, "result": result, "sent_at": store._now() if status == "전송됨" else None})
     return {"status": status, "result": result}
+
+
+def status(store: Store) -> dict:
+    """PC 화면용: 메일 설정이 있는지, 보낼 함에 무엇이 남았는지."""
+    from . import company
+    to = company.ceo_recipients()
+    rows = [dict(r) for r in store.db.execute(
+        "SELECT subject, status, tries, last_error, created_at, sent_at FROM mail_outbox ORDER BY created_at DESC LIMIT 20")]
+    return {"configured": bool(os.environ.get("JINSUNG_SMTP_HOST") and os.environ.get("JINSUNG_SMTP_PASSWORD")),
+            "recipient_set": bool(to), "outbox": rows,
+            "waiting": sum(1 for r in rows if r["status"] != "전송됨")}

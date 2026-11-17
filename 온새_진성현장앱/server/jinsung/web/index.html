@@ -269,11 +269,30 @@ async function showReport() {
       h("p", {class: "note"}, "대상 기간 " + c.period + (c.corrected ? " · 이미 보낸 달(정정본으로 만들어집니다)" : "")),
       c.sites.map(s => h("div", {class: "alert"}, h("span", {class: "badge " + (s.missing.length ? "주황" : "초록")}, s.site),
         `일지 ${s.written}건` + (s.missing.length ? `, 미작성 ${s.missing.length}일 (${s.missing.slice(0, 6).map(d => d.slice(5)).join(", ")}${s.missing.length > 6 ? " …" : ""})` : ""))),
-      h("a", {href: `/api/report/monthly?month=${month.value}`},
-        h("button", {style: "margin-top:12px"}, "Excel 내려받기 (월말보고_" + month.value + ".xlsx)")));
+      h("div", {class: "row", style: "margin-top:12px;gap:8px;flex-wrap:wrap"},
+        h("a", {href: `/api/report/monthly?month=${month.value}`, download: `월말보고_${month.value}.xlsx`}, h("button", {}, "월말보고 3장 (대표님용)")),
+        h("a", {href: `/api/report/monthly?month=${month.value}&detail=1`, download: `월말상세_${month.value}.xlsx`}, h("button", {class: "ghost"}, "월말상세 (일자별·명세서 대조)")),
+        h("a", {href: `/api/report/yearly?year=${month.value.slice(0, 4)}`, download: `연말보고_${month.value.slice(0, 4)}.xlsx`}, h("button", {class: "ghost"}, month.value.slice(0, 4) + "년 연말보고"))),
+      h("p", {class: "note"}, "대표님 메일은 폰 「결제 요청」 탭의 「대표님께 보고 메일 보내기」로 보냅니다. 집 PC가 받아서 보냅니다."));
   };
+  const mail = h("div", {});
+  const loadMail = async () => {
+    const m = await api("/api/mail/status");
+    put(mail, h("h2", {}, "대표님 메일"),
+      h("div", {class: "alert"}, h("span", {class: "badge " + (m.configured && m.recipient_set ? "초록" : "빨강")},
+        m.configured && m.recipient_set ? "보낼 수 있음" : "설정 필요"),
+        !m.configured ? "메일 계정(JINSUNG_SMTP_HOST·USER·PASSWORD)이 없습니다." : !m.recipient_set ? "대표님 메일 주소(config/company.json ceo_email)가 없습니다." : "메일 계정·받는 사람 확인됨"),
+      m.outbox.length ? m.outbox.map(o => h("div", {class: "alert"},
+        h("span", {class: "badge " + (o.status === "전송됨" ? "초록" : "주황")}, o.status),
+        `${o.subject} · ${(o.sent_at || o.created_at).slice(0, 16).replace("T", " ")}` + (o.last_error ? ` · ${o.last_error}` : ""))) :
+        h("p", {class: "note"}, "보낸 메일이 없습니다."),
+      m.waiting ? h("button", {onclick: async () => { try { const r = await api("/api/mail/flush", {}); alert(`보냄 ${r.sent} · 실패 ${r.failed}`); } catch (e) { alert(e.message); } loadMail(); }},
+        `보낼 함 ${m.waiting}건 지금 다시 보내기`) : null);
+  };
+  loadMail();
   put($("report"), h("div", {class: "card"}, steps(1), h("label", {}, "보고할 달"), month,
-    h("div", {style: "margin-top:12px"}, h("button", {onclick: check}, "확인으로"))), h("div", {class: "card"}, out));
+    h("div", {style: "margin-top:12px"}, h("button", {onclick: check}, "확인으로"))), h("div", {class: "card"}, out),
+    h("div", {class: "card"}, mail));
 }
 
 const SHOW = {job: showJob, home: showHome, log: showLog, qty: showQty, report: showReport};

@@ -481,14 +481,28 @@ def _sheet_material(wb, store, month, firm):
     _page(ws, landscape=False)
 
 
+def _firm_line(info: dict) -> str:
+    """보고서 아래 회사 정보 한 줄 (사업자등록증 기준, config/company.json)."""
+    parts = [info.get("name"), f"대표 {info['ceo']}" if info.get("ceo") else None,
+             f"사업자 {info['business_no']}" if info.get("business_no") else None, info.get("address")]
+    return " · ".join(p for p in parts if p)
+
+
 def build_report(store: Store, month: str, out_dir: str | Path, corrected: bool = False) -> Path:
     from .excel_report import report_file_name
-    firm = company.load().get("name") or "진성건설"
+    info = company.load()
+    firm = info.get("name") or "진성건설"
     check = mailer.precheck(store, month)
     wb = Workbook()
     _sheet_report(wb, store, month, firm, check)
     _sheet_attendance(wb, store, month, firm)
     _sheet_material(wb, store, month, firm)
+    line = _firm_line(info)
+    for ws in wb.worksheets:                     # 인쇄할 때 쪽마다 아래에 회사 정보
+        ws.oddFooter.left.text = line
+        ws.oddFooter.left.size = 8
+        ws.oddFooter.right.text = "&P / &N"
+        ws.oddFooter.right.size = 8
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / report_file_name("월말보고", month, corrected=corrected)

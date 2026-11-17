@@ -8,6 +8,7 @@ from datetime import date
 from html import escape
 
 from . import company, mailer, payout, reports
+from .excel_ceo import _firm_line
 from .store import Store
 
 INK, SUB, LINE, HEAD, ACCENT, WARN = "#1b2430", "#5b6675", "#d9dee5", "#f3f5f8", "#1f5fbf", "#b35a00"
@@ -130,6 +131,7 @@ def render(store: Store, month: str, sender: str = "현장소장") -> str:
 {sec("3. 확인할 것")}
 <ul style="margin:0;padding-left:20px;font-size:13px;color:{INK}">{note_html}</ul>
 <div style="margin-top:28px;padding-top:12px;border-top:1px solid {LINE};font-size:12px;color:{SUB}">
+{escape(_firm_line(info))}<br>
 진성현장 앱의 업무일지에서 만든 보고입니다. 숫자는 일지 기준이며, 고칠 내용은 앱에서 고친 뒤 다시 보냅니다.<br>
 첨부: 월말보고_{month}.xlsx (월말보고 · 출역표 · 자재)</div>
 </div></div></body></html>"""

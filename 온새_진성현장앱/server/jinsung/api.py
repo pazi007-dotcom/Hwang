@@ -25,6 +25,13 @@ from .templates import IMPLEMENTED
 WEB = Path(__file__).with_name("web")
 
 
+def _ascii_name(name: str) -> str:
+    """한글 파일 이름을 못 읽는 브라우저용 예비 이름: 월말보고_2026-11.xlsx → monthly_2026-11.xlsx"""
+    for ko, en in (("월말보고", "monthly"), ("월말상세", "monthly_detail"), ("연말보고", "yearly"), ("_정정", "_corrected")):
+        name = name.replace(ko, en)
+    return "".join(c if c.isascii() else "_" for c in name)
+
+
 def _json(obj) -> bytes:
     def default(o):
         if isinstance(o, Decimal):
@@ -131,6 +138,26 @@ class App:
         return [dict(r) for r in self.store.db.execute(
             "SELECT id, name, template_code, design_length FROM work_type WHERE site_id=?", (site,))]
 
+    def mail_status(self, **_):
+        return mailer.status(self.store)
+
+    def mail_flush(self, **_):
+        if not self.transport:
+            raise StoreError("집 PC에 메일 설정이 없습니다 (JINSUNG_SMTP_HOST·USER·PASSWORD).")
+        r = mailer.flush(self.store, self.transport)
+        self._sync_requests()
+        return r
+
+    def _sync_requests(self):
+        """보낼 함에서 나간 보고는 폰의 결제 요청 상태도 '전송됨'으로."""
+        for q in self.store.db.execute("SELECT * FROM pay_request WHERE status IN ('보낼 함 대기','실패')").fetchall():
+            sent = self.store.db.execute(
+                "SELECT o.sent_at FROM mail_outbox o JOIN report_log r ON r.id=o.report_id WHERE r.period=? AND o.status='전송됨'"
+                " ORDER BY o.sent_at DESC LIMIT 1", (q["month"],)).fetchone()
+            if sent:
+                self.store.update("pay_request", q["id"], q["version"],
+                                  {"status": "전송됨", "sent_at": sent["sent_at"], "result": "보낼 함에서 다시 보냄"})
+
     def precheck(self, month, until=None, **_):
         return mailer.precheck(self.store, month, until)
 
@@ -165,6 +192,10 @@ class App:
                                         (site_id,)).fetchone()
             if row and row["status"] == "진행" and row["planned_start"]:
                 schedule.plan(self.store, site_id)
+        # 보낼 함에 남은 메일(인터넷·메일 서버 문제로 실패한 것)은 폰이 맞출 때마다 다시 시도
+        if self.transport and self.store.db.execute("SELECT 1 FROM mail_outbox WHERE status!='전송됨' LIMIT 1").fetchone():
+            mailer.flush(self.store, self.transport)
+            self._sync_requests()
         # 폰에서 「대표님께 보고 메일 보내기」 → 여기서 보고서를 만들어 보낸다
         for c, r in zip(changes, results):
             if c["table_name"] == "pay_request" and r["status"] == "적용" and "보낼 요청" in (c["data_json"] or ""):
@@ -180,11 +211,11 @@ class App:
 GET = {"/api/sites": "sites", "/api/payees": "payees", "/api/home": "home",
        "/api/quantities": "quantities", "/api/work_types": "work_types",
        "/api/precheck": "precheck", "/api/sync/pull": "sync_pull",
-       "/api/board": "board", "/api/job": "job", "/api/day": "day"}
+       "/api/board": "board", "/api/job": "job", "/api/day": "day", "/api/mail/status": "mail_status"}
 POST = {"/api/voice/parse": "voice_parse", "/api/voice/commit": "voice_commit",
         "/api/no_work": "no_work", "/api/sync/push": "sync_push", "/api/receive": "receive",
         "/api/job/status": "job_status", "/api/task/check": "task_check", "/api/task/add": "task_add",
-        "/api/complaint": "complaint"}
+        "/api/complaint": "complaint", "/api/mail/flush": "mail_flush"}
 
 
 def make_handler(app: App, token: str | None):
@@ -240,7 +271,8 @@ def make_handler(app: App, token: str | None):
                 from urllib.parse import quote
                 return self._send(200, path.read_bytes(),
                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                  {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(path.name)}"})
+                                  {"Content-Disposition": f"attachment; filename=\"{_ascii_name(path.name)}\"; "
+                                                         f"filename*=UTF-8''{quote(path.name)}"})
             if url.path in GET:
                 return self._run(GET[url.path], args)
             self._send(404, _json({"error": "없는 주소입니다."}))
