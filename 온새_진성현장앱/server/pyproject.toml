@@ -6,7 +6,7 @@ dependencies = ["openpyxl>=3.1"]
 
 [project.optional-dependencies]
 ai = ["anthropic"]
-dev = ["pytest"]
+dev = ["pytest", "aiosmtpd"]   # aiosmtpd: 메일 전송 시험용 가짜 메일 서버
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
