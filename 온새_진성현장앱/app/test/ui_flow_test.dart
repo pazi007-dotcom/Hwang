@@ -39,7 +39,7 @@ Future<void> field(WidgetTester t, String key, String value) async {
 }
 
 Future<void> receive(WidgetTester t, String name, {String? type, bool full = false}) async {
-  await t.tap(find.text('+ 접수'));
+  await t.tap(find.byKey(const ValueKey('og_new')));
   await t.pumpAndSettle();
   if (type != null) {
     await t.tap(find.byKey(ValueKey('jt_$type')));
@@ -85,6 +85,15 @@ Future<void> addLine(WidgetTester t, String item, String payee, String qty, Stri
   await t.pumpAndSettle();
 }
 
+
+/// 위쪽 현장 버튼 → 「오늘 일지」 (현장 고르기 칸 대신)
+Future<void> pickSite(WidgetTester t, String name) async {
+  await t.tap(find.byWidgetPredicate((w) => w is ActionChip && w.key is ValueKey<String> && (w.key as ValueKey<String>).value.contains(name)).first);
+  await t.pumpAndSettle();
+  await t.tap(find.byKey(const ValueKey('cl_today')));
+  await t.pumpAndSettle();
+}
+
 void main() {
   for (final size in const [Size(360, 740), Size(412, 915), Size(840, 900)]) {
     testWidgets('빈 폰에서 접수 → 일지 → 고치기 → 결제 집계 (${size.width.toInt()}폭)', (t) async {
@@ -120,10 +129,7 @@ void main() {
       await scrollTo(t, find.textContaining('투입 3줄'));
 
       // 3) 현장을 요성리로 바꿔 같은 날 오후 작업 입력 — 단가는 추천으로 채워진다
-      await t.tap(find.byType(DropdownButtonFormField<String>).first);
-      await t.pumpAndSettle();
-      await t.tap(find.textContaining('요성리 용배수로').last);
-      await t.pumpAndSettle();
+      await pickSite(t, '요성리 용배수로');
       await t.tap(find.text('일지'));
       await t.pumpAndSettle();
       await addLine(t, '보통인부', '김반장', '0.5', null);

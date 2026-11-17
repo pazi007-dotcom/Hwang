@@ -6,6 +6,15 @@ import 'package:jinsung_app/row_db.dart';
 import 'package:jinsung_app/store.dart';
 import 'package:material_ui/material_ui.dart';
 
+
+/// 위쪽 현장 버튼 → 「오늘 일지」 (현장 고르기 칸 대신)
+Future<void> pickSite(WidgetTester t, String name) async {
+  await t.tap(find.byWidgetPredicate((w) => w is ActionChip && w.key is ValueKey<String> && (w.key as ValueKey<String>).value.contains(name)).first);
+  await t.pumpAndSettle();
+  await t.tap(find.byKey(const ValueKey('cl_today')));
+  await t.pumpAndSettle();
+}
+
 void main() {
   testWidgets('어제와 같이: 자재·가끔 쓴 장비는 꺼져 있고, 고른 것만 복사 / 하루 겹침 경고', (t) async {
     t.view.physicalSize = const Size(360, 740) * 2.625;
@@ -28,10 +37,7 @@ void main() {
     await t.pumpWidget(JinsungApp(store: store));
     await t.pumpAndSettle();
     // 현장: 요성리로
-    await t.tap(find.byType(DropdownButtonFormField<String>).first);
-    await t.pumpAndSettle();
-    await t.tap(find.textContaining('요성리').last);
-    await t.pumpAndSettle();
+    await pickSite(t, '요성리');
     await t.tap(find.text('일지'));
     await t.pumpAndSettle();
     await t.tap(find.text('어제와 같이'));
@@ -44,10 +50,7 @@ void main() {
     expect((await store.linesOf(ys, today)).map((l) => l['item']), ['보통인부', '6W']);
 
     // 같은 날 긴급 A로 옮겨 김반장 1공수 → 겹침 경고가 떠야 한다
-    await t.tap(find.byType(DropdownButtonFormField<String>).first);
-    await t.pumpAndSettle();
-    await t.tap(find.textContaining('긴급 A').last);
-    await t.pumpAndSettle();
+    await pickSite(t, '긴급 A');
     await t.pump(const Duration(seconds: 3)); // 복사 알림이 사라질 때까지
     await t.pumpAndSettle();
     await t.scrollUntilVisible(find.byKey(const ValueKey('f_item')), 200,

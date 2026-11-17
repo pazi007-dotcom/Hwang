@@ -25,7 +25,7 @@ const won = (n) => n.toLocaleString('en-US');
   let today = '';
   const okIfAsked = async () => { for (const b of ['그대로 저장']) { if (await p.getByRole('button', { name: b, exact: true }).count()) { say(`   ⚠ ${today} 겹침 경고창 → 그대로 저장`); await p.getByRole('button', { name: b, exact: true }).last().click(); await p.waitForTimeout(400); } } };
   const confirm = async (label = '확인') => { await p.getByRole('button', { name: label, exact: true }).last().click(); await p.waitForTimeout(600); };
-  const pickSite = async (name) => { await S.top(); await p.getByRole('button', { name: /현장/ }).first().click(); await p.waitForTimeout(500); await S.click(name, false); await p.waitForTimeout(700); };
+  const pickSite = async (name) => { await S.top(); await S.click(name, false); await p.waitForTimeout(500); await S.click('현장 보기', false); await p.waitForTimeout(700); };   // 위쪽 현장 버튼 → 현장 보기
   const pick = async (labels, qty = {}) => {
     await S.tap('button', '오늘 나온 사람·장비 고르기'); await p.waitForTimeout(500);
     for (const l of labels) { await S.click(l, false); await p.waitForTimeout(150); }
@@ -38,7 +38,7 @@ const won = (n) => n.toLocaleString('en-US');
   const progress = async (from, to) => { await S.type('시공 측점 시작', from); await S.type('시공 측점 끝', to); await S.tap('button', '시공 연장 저장'); };
   const act = async (a, text) => { await S.tap('tab', '홈'); await S.top(); await S.tap('button', a, true); await p.waitForTimeout(400); if (text !== undefined) { await S.fill(async () => p.getByRole('textbox').last(), text); } await confirm(); };
   const receive = async (type, name, addr, cname, cphone, check) => {
-    await S.top(); await S.tap('button', '+ 접수'); await S.click(type); await S.type('공사 이름', name);
+    await S.top(); await S.click('접수', true); await S.click(type); await S.type('공사 이름', name);
     if (addr) { await S.type('공사 위치 (주소·마을·도로명 등)', addr); await S.tap('button', '지금 위치'); await p.waitForTimeout(1200); }
     if (cname) { await S.type('연락처 이름', cname); await S.type('전화번호', cphone); }
     if (check) await S.click(check, false);

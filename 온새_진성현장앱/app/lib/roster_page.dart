@@ -51,8 +51,19 @@ class _RosterPageState extends State<RosterPage> {
     }
   }
 
-  Future<(List<RosterEntry>, Map<String, ({String supply, num alloc, num used, String unit})>)> _load() async =>
-      (await s.roster(), widget.siteId == null ? <String, ({String supply, num alloc, num used, String unit})>{} : await s.allocations(widget.siteId!));
+  List<YearRow> year = [];
+  Future<(List<RosterEntry>, Map<String, ({String supply, num alloc, num used, String unit})>)> _load() async {
+    year = await s.yearByPayee(workDateOf(DateTime.now()).substring(0, 4));
+    return (await s.roster(), widget.siteId == null ? <String, ({String supply, num alloc, num used, String unit})>{} : await s.allocations(widget.siteId!));
+  }
+
+  /// 올해 누계 (사람·장비별): 결제 탭에서 옮겨 옴
+  String? _yearText(RosterEntry r) {
+    final rows = year.where((y) => y.key.startsWith('${r.row['payee_id']}|${r.kind}|${r.item}|'));
+    if (rows.isEmpty) return null;
+    final q = rows.fold<num>(0, (a, y) => a + y.qtyTotal), amt = rows.fold<int>(0, (a, y) => a + y.amountTotal);
+    return '올해 ${fmtQty(q)}${r.unit == '인' ? '공수' : r.unit} · ${wonText(amt)}원';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +77,7 @@ class _RosterPageState extends State<RosterPage> {
         return ListView(padding: const EdgeInsets.all(Tokens.pad), children: [
           FilledButton(key: const ValueKey('r_add'), onPressed: () => _edit(), child: const Text('+ 작업자·장비 등록')),
           const SizedBox(height: 8),
-          Text('일지에 처음 적은 사람·장비도 저장할 때 여기에 자동으로 들어옵니다. 누르면 출역표(날짜별 공수)와 월·연간 합계가 나옵니다.',
+          Text('일지에 처음 적은 사람·장비도 자동으로 들어옵니다. 누르면 출역표(날짜·현장별 공수)와 월별 합계. 파란 글씨 = 올해 누계.',
               style: Theme.of(context).textTheme.bodySmall),
           for (final k in kinds)
             if (list.any((r) => r.kind == k)) ...[
@@ -88,6 +99,8 @@ class _RosterPageState extends State<RosterPage> {
                             Text('${r.item}${r.spec.isEmpty ? '' : ' ${r.spec}'} · ${wonText(r.price)}원/${r.unit}'
                                 '${r.row['phone'] != null ? ' · ${r.row['phone']}' : ''}',
                                 style: Theme.of(context).textTheme.bodySmall),
+                            if (_yearText(r) case final yt?)
+                              Text(yt, key: ValueKey('yr_${r.payeeName}'), style: TextStyle(color: t.blue, fontSize: Tokens.fNote)),
                             if (allocs['${r.item}|${r.spec}'] case final a?)
                               Text(
                                   '${a.supply == '관급자관급' ? '관급(발주처 지급)' : '관급(우리가 구매)'} 배정 ${fmtQty(a.alloc)}${a.unit}'

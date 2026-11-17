@@ -5,7 +5,7 @@ const say = (s) => { log.push(s); console.log(s); };
 (async () => {
   const S = await start(360); const { p } = S;
   const shot = async (w) => { n++; await p.screenshot({ path: `${OUT}/s${String(n).padStart(2, '0')}.png` }); say(`   📷 ${n}. ${w}`); };
-  const pickSite = async (name) => { await S.top(); await p.getByRole('button', { name: /현장/ }).first().click().catch(async () => { await S.click('현장', false); }); await p.waitForTimeout(500); await S.click(name, false); await p.waitForTimeout(600); };
+  const pickSite = async (name) => { await S.top(); await S.click(name, false); await p.waitForTimeout(500); await S.click('현장 보기', false); await p.waitForTimeout(600); };   // 위쪽 현장 버튼 → 현장 보기
   let today = '';
   const okIfAsked = async () => { for (const b of ['그대로 저장', '확인']) { if (await p.getByRole('button', { name: b, exact: true }).count()) {
       if (b === '그대로 저장') { const txt = await p.evaluate(() => [...document.querySelectorAll('flt-semantics')].map(e => e.getAttribute('aria-label') || '').filter(t => /공수|겹|하루/.test(t)).join(' / ')); say(`   ⚠ ${today} 경고창: ${txt.slice(0, 160)}`); }
@@ -43,7 +43,7 @@ const say = (s) => { log.push(s); console.log(s); };
   try {
     // ── 11/2 (월) 아침: 낙찰된 요성리 접수, 명부 등록, 첫 일지
     say('■ 11/2(월) 07:30 사무실 — 요성리 접수, 명부 등록');
-    await S.tap('button', '+ 접수'); await S.click('공사'); await S.type('공사 이름', '요성리 용배수로 개체공사');
+    await S.click('접수', true); await S.click('공사'); await S.type('공사 이름', '요성리 용배수로 개체공사');
     await S.type('공사 위치 (주소·마을·도로명 등)', '문경읍 요성리 일원'); await S.tap('button', '지금 위치'); await p.waitForTimeout(1500);
     await S.type('연락처 이름', '문경시 김주무관'); await S.type('전화번호', '054-550-6100');
     await S.click('도면·내역 받기', false); await shot('요성리 접수');
@@ -66,7 +66,7 @@ const say = (s) => { log.push(s); console.log(s); };
       if (d === 9) { say('■ 11/9(월) 비 — 작업 없음'); await weather('비'); await S.tap('button', '작업 없음(비 등)'); await okIfAsked(); await shot('11/9 비'); continue; }
       if (d === 10) {
         say('■ 11/10(화) 07:50 긴급 전화 — 점촌 배수로 막힘. 오전 긴급, 오후 요성리');
-        await S.tap('button', '+ 접수'); await S.click('긴급'); await S.type('공사 이름', '점촌 배수로 막힘 긴급');
+        await S.click('접수', true); await S.click('긴급'); await S.type('공사 이름', '점촌 배수로 막힘 긴급');
         await S.type('공사 위치 (주소·마을·도로명 등)', '점촌동 중앙시장 앞'); await S.tap('button', '지금 위치'); await p.waitForTimeout(1500);
         await S.type('연락처 이름', '점촌동 행정복지센터'); await S.type('전화번호', '054-550-8600');
         await S.click('피해 사진(전) 찍기', false); await shot('긴급 접수 (체크 2개)'); await S.tap('button', '접수', true); await p.waitForTimeout(800);
@@ -86,7 +86,7 @@ const say = (s) => { log.push(s); console.log(s); };
       await weather('맑음'); await content(work[d]);
       if (d === 12) {
         say('■ 11/12(목) 점심 — 불정동 옹벽 견적 요청 접수');
-        await S.tap('button', '+ 접수'); await S.click('견적'); await S.type('공사 이름', '불정동 옹벽 보수 견적'); await S.type('공사 위치 (주소·마을·도로명 등)', '불정동 마을회관 뒤');
+        await S.click('접수', true); await S.click('견적'); await S.type('공사 이름', '불정동 옹벽 보수 견적'); await S.type('공사 위치 (주소·마을·도로명 등)', '불정동 마을회관 뒤');
         await shot('견적 접수 (체크 2개)'); await S.tap('button', '접수', true); await p.waitForTimeout(800);
         await pickSite('요성리 용배수로 개체공사');
       }

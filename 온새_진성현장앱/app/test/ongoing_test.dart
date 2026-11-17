@@ -22,7 +22,8 @@ void main() {
       expect(miss, isNotEmpty);
       await t.pumpWidget(JinsungApp(store: s));
       await t.pumpAndSettle();
-      expect(find.text('진행 중'), findsOneWidget);
+      expect(find.byType(DropdownButtonFormField<String>), findsNothing); // 현장 고르기 칸은 없어짐 (버튼 줄 하나)
+      expect(find.byKey(const ValueKey('og_new')), findsOneWidget);
       expect(find.textContaining('난간기둥보수 · 밀린 ${miss.length}일'), findsOneWidget);
       await t.tap(find.byKey(const ValueKey('og_난간기둥보수')));
       await t.pumpAndSettle();
@@ -40,6 +41,18 @@ void main() {
       await t.pumpAndSettle();
       expect(await s.missingLogDays(a, workDateOf(today)), isNot(contains(miss.last)));
       expect(find.textContaining('밀린 ${miss.length - 1}일').evaluate().length + (miss.length == 1 ? 1 : 0), greaterThan(0));
+      // 「현장 보기」 → 홈, 홈 「일지」 칸의 날짜를 누르면 그 날 일지로
+      await t.tap(find.byKey(const ValueKey('og_요성리 용배수로')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('cl_view')));
+      await t.pumpAndSettle();
+      expect(find.text('오늘 현장 보기'), findsOneWidget);
+      await t.scrollUntilVisible(find.byKey(const ValueKey('home_today')), 300,
+          scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first);
+      await t.tap(find.byKey(const ValueKey('home_today')));
+      await t.pumpAndSettle();
+      expect(find.text('오늘 일지 쓰기'), findsOneWidget);
+      expect(find.text(workDateOf(today)), findsOneWidget);
     });
   }
 }
