@@ -109,9 +109,7 @@ def plan(store: Store, site_id: str) -> list[str]:
     for kind, title, offset, qty, unit, wt in rows:
         if title in kept or same(title):        # 이미 끝낸 일·체크리스트와 같은 일은 다시 만들지 않는다
             continue
-        due = _d(start, offset)
-        if offset < 0:                          # 준비(발주·확인)는 주말 전에. 시작 후 확인(사진 후 등)은 그대로
-            due = _workday_before(due)
+        due = _workday_before(_d(start, offset))   # 토·일 기한은 그 전 금요일로 (블록 타설 확인 포함)
         ids.append(intake.add_task(store, site_id, kind, title, due_date=due,
                                    qty=None if qty is None else _q(qty), unit=unit, work_type_id=wt,
                                    source="온새 제안"))

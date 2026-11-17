@@ -30,6 +30,9 @@ async function start(width = 360) {
       if (o) return o; await S.scroll(i < 14 ? 350 : -350); } throw new Error('글자 못 찾음: ' + t); };
   S.click = async (t, exact = true) => { const o = await S.text(t, exact); await p.mouse.click(o[0], o[1]); await p.waitForTimeout(450); };
   S.has = async (t) => p.evaluate((t) => [...document.querySelectorAll('flt-semantics')].some(e => (e.getAttribute('aria-label') || e.textContent || '').includes(t)), t);
+  S.labels = async () => p.evaluate(() => { const host = document.querySelector('flt-semantics-host') || document.body;
+    return [...new Set([...host.querySelectorAll('*')].filter(e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.y > 60 && r.y < 740; })
+      .map(e => (e.getAttribute('aria-label') || [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('') || '').trim()).filter(Boolean))]; });
   S.all = async () => p.evaluate(() => [...new Set([...document.querySelectorAll('flt-semantics')].map(e => (e.getAttribute('aria-label') || '').trim()).filter(Boolean))]);
   S.day = async (iso) => { // 다음 날 아침: 폰을 껐다가 앱을 다시 연다
     await p.evaluate((iso) => window.__setNow(iso), iso);
