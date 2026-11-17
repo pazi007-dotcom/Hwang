@@ -331,7 +331,7 @@ class _AttendancePageState extends State<AttendancePage> {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     SizedBox(width: 48, child: Text(d.date.substring(5))),
-                    Expanded(child: Text(d.parts.map((p) => '${p.site} ${fmtQty(p.qty)}${p.unit}').join('\n'))),
+                    Expanded(child: Text(d.parts.map((p) => '${p.site}\u00a0${fmtQty(p.qty)}\u2060${p.unit}').join('\n'))),
                     Text(wonText(d.amount)),
                   ]),
                 ),

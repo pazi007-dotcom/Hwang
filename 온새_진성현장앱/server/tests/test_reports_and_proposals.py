@@ -399,3 +399,14 @@ def test_ceo_report_three_sheets(world, tmp_path):
     sand_rows = [r for r in mat if r[2] == "문경골재"]
     assert [(r[3], r[9]) for r in sand_rows] == [("모래", None), ("잡석", 120000)]
     assert sand_rows[0][10] == "단가 미입력"
+
+
+def test_missing_log_days_only_between_start_and_completion():
+    """완공 뒤·시작 전 날짜는 '일지 없는 날'로 세지 않는다."""
+    from jinsung import reports
+    s = Store()
+    site = s.create_site("요성리")
+    s.update("site", site, s.get("site", site)["version"], {"planned_start": "2026-12-07", "end_date": "2026-12-18"})
+    s.mark_no_work(site, "2026-12-07", "비")
+    miss = reports.log_coverage(s, site, "2026-12")["missing"]
+    assert miss[0] == "2026-12-08" and miss[-1] == "2026-12-18"

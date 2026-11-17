@@ -69,10 +69,15 @@ def log_coverage(store: Store, site_id: str, month: str, until: str | None = Non
     from datetime import date, timedelta
     start, end = month_range(month)
     site = store.get("site", site_id)
-    if site.get("start_date") and site["start_date"] > start:
-        start = site["start_date"]
+    begun = site.get("start_date") or site.get("planned_start")      # 폰은 시작 예정일을 넣는다
+    if begun and begun > start:
+        start = begun
+    if site.get("end_date") and site["end_date"] < end:              # 완공 뒤는 일지가 없는 게 맞다
+        end = site["end_date"]
     if until and until < end:
         end = until
+    if start > end:
+        return {"written": 0, "missing": []}
     have = {r["work_date"] for r in store.db.execute(
         "SELECT work_date FROM work_log WHERE site_id=? AND work_date BETWEEN ? AND ?",
         (site_id, start, end))}
