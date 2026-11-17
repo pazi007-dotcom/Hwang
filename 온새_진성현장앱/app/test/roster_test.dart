@@ -93,4 +93,14 @@ void main() {
     expect(w.rate, closeTo(0.096, 1e-9));
     expect(() => s.addProgressSta(ys, '2026-11-11', wt, 'No.2', 'No.1'), throwsA(isA<StoreError>()));
   });
+
+  test('진행 중 공사의 밀린 일지: 시작일 이후 평일 중 일지 없는 날', () async {
+    final s = Store(MemoryDb(), device: 'phone');
+    final a = await s.receive('난간기둥보수', '공사', '2026-11-09');
+    await s.proceed(a, plannedStart: '2026-11-11');
+    await s.markNoWork(a, '2026-11-12'); // 비 → 일지 있음
+    await s.setLogContent(a, '2026-11-16', '페인트');
+    // 11/17(화) 기준: 11/11 수, 11/13 금 이 밀림 (11/12 비, 11/14·15 주말, 11/16 씀)
+    expect(await s.missingLogDays(a, '2026-11-17'), ['2026-11-11', '2026-11-13']);
+  });
 }

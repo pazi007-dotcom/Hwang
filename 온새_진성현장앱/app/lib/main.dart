@@ -67,6 +67,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   String? siteId;
   List<Rec> sites = [];
   int version = 0; // 자료가 바뀌면 올려서 화면을 다시 그린다
+  String? logDate; // 「진행 중」에서 고른 일지 날짜
+  Map<String, List<String>> missing = {}; // 진행 중 현장 → 밀린 일지 날짜
 
   static const titles = ['오늘 현장 보기', '오늘 일지 쓰기', '결제 요청·한 달 집계', '작업자·장비 명부', '집 PC와 맞추기'];
 
@@ -88,6 +90,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && workDateOf(DateTime.now()) != today) {
       today = workDateOf(DateTime.now());
+      logDate = null;
       reload();
     }
   }
@@ -95,12 +98,64 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   Future<void> reload() async {
     final list = await widget.store.db.all('site');
     list.sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String));
+    final miss = <String, List<String>>{
+      for (final x in list)
+        if (x['status'] == '진행') x['id'] as String: await widget.store.missingLogDays(x['id'] as String, workDateOf(DateTime.now())),
+    };
     if (!mounted) return;
     setState(() {
       sites = list;
+      missing = miss;
       if (siteId == null || !list.any((s) => s['id'] == siteId)) {
         siteId = list.isEmpty ? null : list.first['id'] as String;
       }
+      version++;
+    });
+  }
+
+  /// 「진행 중」 공사 누르기 → 날짜 고르기(오늘 / 밀린 날) → 그 현장·그 날짜 일지로 바로.
+  Future<void> _continueLog(Rec site) async {
+    final today = workDateOf(DateTime.now());
+    final miss = missing[site['id']] ?? const <String>[];
+    const yo = ['월', '화', '수', '목', '금', '토', '일'];
+    String label(String d) => '${int.parse(d.substring(5, 7))}/${int.parse(d.substring(8))} (${yo[DateTime.parse(d).weekday - 1]})';
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(shrinkWrap: true, padding: const EdgeInsets.all(Tokens.pad), children: [
+          Text('${site['name']} — 어느 날 일지를 쓸까요?', style: Theme.of(ctx).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          ListTile(
+            key: const ValueKey('cl_today'),
+            leading: const Icon(Icons.today),
+            title: Text('오늘 ${label(today)}'),
+            onTap: () => Navigator.pop(ctx, today),
+          ),
+          for (final d in miss.reversed)
+            ListTile(
+              key: ValueKey('cl_$d'),
+              leading: Icon(Icons.history, color: widget.tokens.warn),
+              title: Text('밀린 날 ${label(d)}'),
+              subtitle: const Text('일지 없음'),
+              onTap: () => Navigator.pop(ctx, d),
+            ),
+          ListTile(
+            leading: const Icon(Icons.calendar_month),
+            title: const Text('다른 날 고르기'),
+            onTap: () async {
+              final d = await showDatePicker(context: ctx, initialDate: DateTime.now(), firstDate: DateTime(2020),
+                  lastDate: DateTime(2100), helpText: '${site['name']} 일지 날짜');
+              if (ctx.mounted) Navigator.pop(ctx, d == null ? null : workDateOf(d));
+            },
+          ),
+        ]),
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      siteId = site['id'] as String;
+      logDate = picked;
+      tab = 1;
       version++;
     });
   }
@@ -240,8 +295,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     final pages = [
       HomePage(key: ValueKey('h$version$siteId'), store: widget.store, siteId: siteId, tokens: t,
           onChanged: reload),
-      LogPage(key: ValueKey('l$siteId$today'), store: widget.store, siteId: siteId, tokens: t,
-          onChanged: reload),
+      LogPage(key: ValueKey('l$siteId$today$logDate'), store: widget.store, siteId: siteId, tokens: t,
+          onChanged: reload, initialDate: logDate),
       PayPage(key: ValueKey('p$version$today'), store: widget.store, tokens: t, onChanged: reload),
       RosterPage(key: ValueKey('r$version$siteId'), store: widget.store, tokens: t, onChanged: reload, siteId: siteId,
           siteName: sites.where((x) => x['id'] == siteId).map((x) => x['name'] as String).firstOrNull),
@@ -274,6 +329,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
                   ],
                   onChanged: (v) => setState(() {
                     siteId = v;
+                    logDate = null;
                     version++;
                   }),
                 ),
@@ -284,6 +340,23 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
               ),
             ]),
           ),
+          if (missing.isNotEmpty)
+            Padding(
+              key: const ValueKey('ongoing'),
+              padding: const EdgeInsets.fromLTRB(Tokens.pad, 0, Tokens.pad, 8),
+              child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text('진행 중', style: TextStyle(color: t.sub, fontSize: Tokens.fNote)),
+                for (final x in sites.where((x) => missing.containsKey(x['id'])))
+                  ActionChip(
+                    key: ValueKey('og_${x['name']}'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: x['id'] == siteId ? t.blue.withValues(alpha: 0.18) : null,
+                    avatar: Icon(Icons.edit_note, size: 18, color: missing[x['id']]!.isEmpty ? t.sub : t.warn),
+                    label: Text('${x['name']}${missing[x['id']]!.isEmpty ? '' : ' · 밀린 ${missing[x['id']]!.length}일'}'),
+                    onPressed: () => _continueLog(x),
+                  ),
+              ]),
+            ),
           Expanded(child: pages[tab]),
         ]),
       ),
@@ -657,8 +730,9 @@ class HomePage extends StatelessWidget {
 /// 업무일지: 모든 공사의 시작. 기준 정보 없이도 바로 입력되고, 처음 쓴 업체·항목은 저장할 때 등록된다.
 class LogPage extends StatefulWidget {
   const LogPage({super.key, required this.store, required this.siteId, required this.tokens,
-      required this.onChanged});
+      required this.onChanged, this.initialDate});
   final Store store;
+  final String? initialDate; // 「진행 중」에서 고른 날 (밀린 일지)
   final String? siteId;
   final Tokens tokens;
   final Future<void> Function() onChanged;
@@ -667,7 +741,7 @@ class LogPage extends StatefulWidget {
 }
 
 class _LogPageState extends State<LogPage> {
-  DateTime date = DateTime.now();
+  late DateTime date = widget.initialDate == null ? DateTime.now() : DateTime.parse(widget.initialDate!);
   String? progWt;
   final progFrom = TextEditingController();
   final progTo = TextEditingController();
@@ -961,6 +1035,7 @@ class _LogPageState extends State<LogPage> {
     try {
       await s.setLogContent(widget.siteId!, workDate, content.text);
       setState(() => refresh++);
+      await widget.onChanged(); // 위쪽 「밀린 n일」·홈 '오늘 일지 미작성'도 바로 바뀌게
       if (mounted) showMessage(context, '작업 내용을 저장했습니다.');
     } on StoreError catch (e) {
       if (mounted) showMessage(context, e.message);
@@ -1637,7 +1712,7 @@ class _PayPageState extends State<PayPage> {
 }
 
 /// 앱 버전 (pubspec.yaml 의 version 과 같게 올린다). 동기화 탭 맨 아래에 보인다.
-const appVersion = '0.4.1';
+const appVersion = '0.4.2';
 
 // ───────────────────────── 동기화 ─────────────────────────
 class SyncPage extends StatefulWidget {

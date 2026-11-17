@@ -10,7 +10,7 @@ import 'package:jinsung_app/store.dart';
 import 'package:material_ui/material_ui.dart';
 
 Future<void> scrollTo(WidgetTester t, Finder f) async {
-  await t.scrollUntilVisible(f, 200, scrollable: find.byType(Scrollable).first, maxScrolls: 80);
+  await t.scrollUntilVisible(f, 200, scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first, maxScrolls: 80);
   await t.pumpAndSettle();
 }
 
@@ -18,9 +18,9 @@ Future<void> tapText(WidgetTester t, String text) async {
   if (find.text(text).evaluate().isEmpty) {
     // 화면 밖이면 아래로, 없으면 위로 찾아 간다
     try {
-      await t.scrollUntilVisible(find.text(text), 200, scrollable: find.byType(Scrollable).first, maxScrolls: 40);
+      await t.scrollUntilVisible(find.text(text), 200, scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first, maxScrolls: 40);
     } catch (_) {
-      await t.scrollUntilVisible(find.text(text), -200, scrollable: find.byType(Scrollable).first, maxScrolls: 80);
+      await t.scrollUntilVisible(find.text(text), -200, scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first, maxScrolls: 80);
     }
     await t.pumpAndSettle();
   }
@@ -170,7 +170,7 @@ void main() {
 
       // 6) 대표님께 보고 메일 보내기 (집 PC 주소가 없으면 요청만 남고, 맞추면 집 PC가 보낸다)
       await t.pump(const Duration(seconds: 3)); // 앞 알림이 사라질 때까지
-      await t.drag(find.byType(Scrollable).first, const Offset(0, 5000)); // 맨 위로
+      await t.drag(find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first, const Offset(0, 5000)); // 맨 위로
       await t.pumpAndSettle();
       await t.tap(find.byKey(const ValueKey('send_mail')));
       await t.pumpAndSettle();

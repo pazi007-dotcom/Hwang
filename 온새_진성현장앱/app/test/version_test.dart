@@ -18,7 +18,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('동기화'));
     await t.pumpAndSettle();
-    await t.scrollUntilVisible(find.byKey(const ValueKey('app_version')), 200, scrollable: find.byType(Scrollable).first);
+    await t.scrollUntilVisible(find.byKey(const ValueKey('app_version')), 200, scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first);
     expect(find.text('진성현장 앱 $appVersion'), findsOneWidget);
   });
 }

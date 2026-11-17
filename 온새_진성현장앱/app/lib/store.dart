@@ -250,6 +250,22 @@ class Store {
     return out;
   }
 
+  /// 진행 중인 공사의 밀린 일지: 시작일(없으면 접수일) 이후 최근 [days]일 중 평일인데 일지가 없는 날. 오래된 날부터.
+  Future<List<String>> missingLogDays(String siteId, String today, {int days = 14}) async {
+    final site = await mustGet('site', siteId);
+    final begin = (site['planned_start'] ?? site['received_date'] ?? site['start_date']) as String?;
+    final have = {for (final l in await db.all('work_log')) if (l['site_id'] == siteId) l['work_date'] as String};
+    final t = DateTime.parse(today);
+    final out = <String>[];
+    for (var i = days; i >= 1; i--) {
+      final d = t.subtract(Duration(days: i));
+      final ds = workDateOf(d);
+      if (d.weekday > 5 || (begin != null && ds.compareTo(begin) < 0) || have.contains(ds)) continue;
+      out.add(ds);
+    }
+    return out;
+  }
+
   // ---------- 마감 ----------
   Future<bool> isLocked(String month) async => await db.get('month_lock', month) != null;
 

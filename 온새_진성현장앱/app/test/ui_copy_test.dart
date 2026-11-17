@@ -50,11 +50,14 @@ void main() {
     await t.pumpAndSettle();
     await t.pump(const Duration(seconds: 3)); // 복사 알림이 사라질 때까지
     await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.byKey(const ValueKey('f_item')), 200,
+        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first);
+    await t.pumpAndSettle();
     await t.enterText(find.byKey(const ValueKey('f_item')), '보통인부');
     await t.enterText(find.byKey(const ValueKey('f_payee')), '김반장');
     await t.enterText(find.byKey(const ValueKey('f_price')), '187000');
     await t.pumpAndSettle();
-    await t.scrollUntilVisible(find.byKey(const ValueKey('f_save')), 200, scrollable: find.byType(Scrollable).first);
+    await t.scrollUntilVisible(find.byKey(const ValueKey('f_save')), 200, scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first);
     await t.ensureVisible(find.byKey(const ValueKey('f_save')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const ValueKey('f_save')));
